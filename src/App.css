@@ -1,38 +1,112 @@
-.App {
+.app {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  align-items: stretch;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2.5rem 1.5rem 3rem;
+  color: #1f1f1f;
+}
+
+h1 {
+  margin: 0;
+  font-size: 2.5rem;
   text-align: center;
 }
 
-.App-logo {
-  height: 40vmin;
+.instructions {
+  margin: 0;
+  text-align: center;
+  color: #4d4d4d;
+}
+
+.canvas {
+  position: relative;
+  display: inline-block;
+  align-self: center;
+  cursor: crosshair;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  box-shadow: 0 20px 35px rgba(15, 23, 42, 0.15);
+  background: #ffffff;
+}
+
+.canvas-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
+.overlay line {
+  stroke: #ff4d4f;
+  stroke-width: 1.2;
+  stroke-linecap: round;
 }
 
-.App-header {
-  background-color: #282c34;
-  min-height: 100vh;
+.marker {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  background: #ff4d4f;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 6px 12px rgba(15, 23, 42, 0.25);
+  border: 2px solid #ffffff;
+  pointer-events: none;
+}
+
+.actions {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  gap: 0.75rem;
   align-items: center;
   justify-content: center;
-  font-size: calc(10px + 2vmin);
-  color: white;
 }
 
-.App-link {
-  color: #61dafb;
+button {
+  border-radius: 999px;
+  border: none;
+  padding: 0.65rem 1.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  font-family: inherit;
+  background-color: #2563eb;
+  color: #ffffff;
+  cursor: pointer;
+  transition: background-color 150ms ease-in-out;
 }
 
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
+button:hover {
+  background-color: #1d4ed8;
+}
+
+button:focus,
+button:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.45);
+  outline-offset: 2px;
+}
+
+.readout {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.9rem;
+  color: #334155;
+}
+
+@media (max-width: 720px) {
+  .app {
+    padding: 2rem 1rem 2.5rem;
   }
-  to {
-    transform: rotate(360deg);
+
+  h1 {
+    font-size: 2rem;
   }
 }
