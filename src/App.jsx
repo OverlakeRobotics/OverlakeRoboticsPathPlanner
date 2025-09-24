@@ -1,15 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import decodeField from "./assets/decode_field.png";
 
 /**
- * FTC Path Planner – DECODE-ready (v4.1)
+ * FTC Path Planner – DECODE-ready (v4.3)
  *
- * New in this version:
- * • Interactive PATH PREVIEW with Play / Pause / Stop — robot animates along the path at a set speed
- * • Heading interpolates linearly from the START heading to the SECOND point's target heading (index 1)
- *   across the ENTIRE path (e.g., 0°→90° ⇒ 45° halfway). If fewer than 2 points, it targets the last point's heading.
- * • Custom snap value (in); if >0 it overrides the dropdown. Snap is anchored to field corner (-72,-72)
- * • Robot footprint only on the LAST point while drawing (plus live faded preview when hovering)
- * • Export formatting: one Pose2D per line in the array
+ * Changes in this version:
+ * • Header and helper texts removed; axis and canvas badges removed
+ * • Canvas centered
+ * • Default field image from ./assets/decode_field.png (upload supported; URL input removed)
+ * • Hold-to-draw for Line segments (continuous points while mouse is down & moving)
+ * • Curves: Quadratic Bezier (control click, then end click) and Circular Arc (mid click, then end click)
+ * • Grid overlay toggle with adjustable resolution (inches)
  *
  * Coordinates: +X forward (UP on screen), +Y left (LEFT on screen), +heading left (CCW)
  * Pose format: new Pose2D(DistanceUnit.INCH, x, y, AngleUnit.DEGREES, heading)
@@ -22,10 +23,6 @@ const styles = `
 html,body,#root{ height:100%; }
 body{ margin:0; background:radial-gradient(1200px 800px at 80% -20%, #1f2a4a, #0b1324 60%); color:var(--txt); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji"; }
 .app{ display:grid; grid-template-columns:340px 1fr 420px; gap:14px; padding:14px; height:100vh; }
-.header{ grid-column:1/-1; display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-radius:14px; background:linear-gradient(120deg,#16224a,#0e1733); box-shadow:var(--shadow); }
-.brand{ display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.2px; }
-.logo{ width:28px; height:28px; border-radius:8px; background:conic-gradient(from 90deg, #55ccff, #6be675, #55ccff); box-shadow:0 0 0 2px #0b1324 inset; }
-.subtle{ color:var(--muted); font-size:12px; }
 .card{ background:var(--card); border:1px solid rgba(255,255,255,.06); border-radius:14px; padding:12px; box-shadow:var(--shadow); }
 .card h3{ margin:4px 0 10px; font-size:15px; letter-spacing:.3px; }
 .controls{ display:grid; gap:10px; }
@@ -41,20 +38,18 @@ body{ margin:0; background:radial-gradient(1200px 800px at 80% -20%, #1f2a4a, #0
 .btn.ghost{ background:rgba(255,255,255,.06); }
 .input,select,.number{ width:100%; background:#0f1833; color:var(--txt); border:1px solid rgba(255,255,255,.12); padding:9px 10px; border-radius:10px; }
 .small{ font-size:12px; color:var(--muted); }
-.pill{ display:inline-flex; align-items:center; gap:8px; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.12); border-radius:999px; padding:4px 8px; }
 .grid{ display:grid; gap:10px; }
 .grid.two{ grid-template-columns:1fr 1fr; }
 .grid.three{ grid-template-columns:1fr 1fr 1fr; }
 .badge{ display:inline-block; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.12); padding:3px 8px; border-radius:999px; font-size:12px; color:var(--muted); }
-.canvasWrap{ position:relative; border-radius:16px; overflow:hidden; background:#0b1324; border:1px solid rgba(255,255,255,.1); box-shadow:var(--shadow); }
-.canvasTop{ position:absolute; top:10px; left:10px; display:flex; gap:8px; z-index:10; }
-.axis{ position:absolute; right:10px; bottom:10px; background:rgba(0,0,0,.35); border:1px solid rgba(255,255,255,.15); border-radius:10px; padding:6px 8px; font-size:12px; }
-.kbd{ padding:2px 6px; border:1px solid rgba(255,255,255,.3); border-bottom-width:2px; border-radius:6px; font-size:12px; }
+
+/* Canvas centering + stacking */
+.canvasWrap{ position:relative; border-radius:16px; overflow:hidden; background:#0b1324; border:1px solid rgba(255,255,255,.1); box-shadow:var(--shadow); display:grid; place-items:center; }
+.canvasStack{ position:relative; }
 .codebox{ white-space:pre; background:#0c1430; border:1px solid rgba(255,255,255,.12); border-radius:10px; padding:10px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; height:280px; overflow:auto; }
-.help{ line-height:1.4; }
-footer{ grid-column:1/-1; text-align:center; color:var(--muted); padding-top:4px; font-size:12px; }
 hr.sep{ border:none; height:1px; background:linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.18), rgba(255,255,255,0)); margin:8px 0; }
 label small{ color:var(--muted); }
+footer{ grid-column:1/-1; text-align:center; color:var(--muted); padding-top:4px; font-size:12px; }
 `;
 
 // ---------- Utilities ----------
@@ -97,14 +92,13 @@ export default function App() {
   const ppi = useMemo(() => canvasSize / fieldInches, [canvasSize]);
   const center = useMemo(() => ({ x: canvasSize / 2, y: canvasSize / 2 }), [canvasSize]);
 
-  // Background image (default: crisp 12×12 grid SVG)
+  // Background image (default: decode field)
   const [bgImg, setBgImg] = useState(null);
-  const [bgUrlInput, setBgUrlInput] = useState("");
 
   // Start pose & points
   const [startPose, setStartPose] = useState({ x: 0, y: 0, h: 0 });
   const [placeStart, setPlaceStart] = useState(false);
-  const [points, setPoints] = useState([]); // {x, y, h}
+  const [points, setPoints] = useState([]); // {x, y, h} with h frozen at creation
 
   // Modes & params
   const [mode, setMode] = useState("straight"); // "straight" | "tangent" | "orth-left" | "orth-right"
@@ -127,6 +121,15 @@ export default function App() {
   const rafRef = useRef(null);
   const lastTsRef = useRef(0);
 
+  // Curve construction state
+  const [shapeType, setShapeType] = useState("line"); // 'line' | 'bezier' | 'arc'
+  const [bezierTemp, setBezierTemp] = useState(null); // {control:{x,y}}
+  const [arcTemp, setArcTemp] = useState(null); // {mid:{x,y}}
+
+  // Grid overlay
+  const [showGrid, setShowGrid] = useState(false);
+  const [gridStep, setGridStep] = useState(24); // inches
+
   // Derived: waypoints and total length
   const waypoints = useMemo(() => {
     const sx = num(startPose.x), sy = num(startPose.y);
@@ -135,30 +138,14 @@ export default function App() {
 
   const totalLen = useMemo(() => polylineLength(waypoints), [waypoints]);
 
-  // Rotation preview target: heading of the SECOND point (index 1). If fewer points, fallbacks.
-  const previewTargetHeading = useMemo(() => {
-    if (points.length >= 2) return resolveHeadingAt(1); // heading at second clicked point
-    if (points.length === 1) return resolveHeadingAt(0);
-    return num(startPose.h);
-  }, [points, startPose, mode]);
-
   // Hi-DPI scaling
   const dpr = Math.max(1, typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1);
 
-  // Default background grid
+  // Load default DECODE field image
   useEffect(() => {
     const img = new Image();
-    const tiles = 12; const size = 1024; const tile = size / tiles;
-    let svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${size}' height='${size}'>` +
-        `<rect width='100%' height='100%' fill='#0e1733'/>` +
-        `<g stroke='#334155' stroke-width='2'>`;
-    for (let i = 0; i <= tiles; i++) { const p = i * tile; svg += `<line x1='0' y1='${p}' x2='${size}' y2='${p}'/>`; svg += `<line x1='${p}' y1='0' x2='${p}' y2='${size}'/>`; }
-    svg += `</g><g stroke='#64748b' stroke-width='3'>`;
-    svg += `<line x1='${size/2}' y1='0' x2='${size/2}' y2='${size}'/>`;
-    svg += `<line x1='0' y1='${size/2}' x2='${size}' y2='${size/2}'/>`;
-    svg += `</g></svg>`;
-    img.src = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
     img.onload = () => setBgImg(img);
+    img.src = decodeField;
   }, []);
 
   // Animation loop
@@ -202,28 +189,32 @@ export default function App() {
       ctx.drawImage(bgImg, dx, dy, drawW, drawH);
     } else { ctx.fillStyle = "#0e1733"; ctx.fillRect(0, 0, canvasSize, canvasSize); }
 
-    // Grid aligned to world (-72..72)
-    drawGrid(ctx);
+    // Optional grid overlay
+    if (showGrid && gridStep > 0.01) drawGrid(ctx, gridStep);
 
     // Path lines (from START to first point, then between points)
     drawPath(ctx);
 
-    // Overlay: markers, preview, axis, and playback robot
+    // Overlay: markers, preview, and playback robot (axes removed)
     octx.clearRect(0, 0, canvasSize, canvasSize);
     drawStartMarker(octx);
     drawPointMarkersAndFootprints(octx);
     drawPreview(octx);
     drawPlaybackRobot(octx);
-    drawAxis(octx);
-  }, [bgImg, canvasSize, dpr, ppi, center, points, startPose, mode, robotL, robotW, preview, playState, playDist, totalLen, previewTargetHeading]);
+  }, [bgImg, canvasSize, dpr, ppi, center, points, startPose, mode, robotL, robotW, preview, playState, playDist, totalLen, showGrid, gridStep]);
 
-  function drawGrid(ctx) {
-    const tileIn = 24; ctx.save(); ctx.lineWidth = 1.2; ctx.strokeStyle = "#334155";
-    for (let y = -FIELD_EDGE; y <= FIELD_EDGE; y += tileIn) { const { cx } = worldToCanvas(0, y, center.x, center.y, ppi); ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, canvasSize); ctx.stroke(); }
-    for (let x = -FIELD_EDGE; x <= FIELD_EDGE; x += tileIn) { const { cy } = worldToCanvas(x, 0, center.x, center.y, ppi); ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(canvasSize, cy); ctx.stroke(); }
-    ctx.lineWidth = 2.2; ctx.strokeStyle = "#64748b"; const c = worldToCanvas(0, 0, center.x, center.y, ppi);
-    ctx.beginPath(); ctx.moveTo(0, c.cy); ctx.lineTo(canvasSize, c.cy); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(c.cx, 0); ctx.lineTo(c.cx, canvasSize); ctx.stroke(); ctx.restore();
+  function drawGrid(ctx, stepIn) {
+    const s = Math.max(0.1, stepIn);
+    ctx.save(); ctx.lineWidth = 1.2; ctx.strokeStyle = "#334155";
+    for (let y = -FIELD_EDGE; y <= FIELD_EDGE + 1e-6; y += s) {
+      const { cx } = worldToCanvas(0, y, center.x, center.y, ppi);
+      ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, canvasSize); ctx.stroke();
+    }
+    for (let x = -FIELD_EDGE; x <= FIELD_EDGE + 1e-6; x += s) {
+      const { cy } = worldToCanvas(x, 0, center.x, center.y, ppi);
+      ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(canvasSize, cy); ctx.stroke();
+    }
+    ctx.restore();
   }
 
   function drawPath(ctx) {
@@ -279,7 +270,7 @@ export default function App() {
   function drawPointMarkersAndFootprints(ctx) {
     ctx.save();
     points.forEach((p, i) => {
-      const h = resolveHeadingAt(i);
+      const h = num(p.h ?? 0); // FROZEN heading
       const { cx, cy } = worldToCanvas(p.x, p.y, center.x, center.y, ppi);
       // point dot
       ctx.fillStyle = i === points.length - 1 ? "#ffffff" : "#cbd5e1"; ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI * 2); ctx.fill();
@@ -288,7 +279,7 @@ export default function App() {
     });
     // Only draw the ROBOT outline on the LAST point
     if (points.length > 0) {
-      const i = points.length - 1; const p = points[i]; const h = resolveHeadingAt(i);
+      const i = points.length - 1; const p = points[i]; const h = num(p.h ?? 0);
       drawRectFootprint(ctx, p.x, p.y, h, robotL, robotW, { fill: "#7aa2ff", stroke: "#7aa2ff", alpha: 0.12 });
     }
     ctx.restore();
@@ -318,11 +309,11 @@ export default function App() {
     if (!g) return;
     const { pos, i, t } = g; // segment index i, local param t in [0..1]
 
-    // Heading should rotate from hi to hi+1 over THIS segment only
+    // Heading rotates from hi to hi+1 over THIS segment only, using frozen headings
     const h0 = headingAtWaypoint(i);
     const h1 = headingAtWaypoint(i + 1);
     const delta = shortestDeltaDeg(h0, h1);
-    const h = normDeg(h0 + delta * t); // constant deg/s because t advances at constant in/s
+    const h = normDeg(h0 + delta * t);
 
     // Draw robot footprint + heading arrow
     drawRectFootprint(ctx, pos.x, pos.y, h, robotL, robotW, { fill: "#ffe08a", stroke: "#ffd166", alpha: 0.16 });
@@ -330,7 +321,6 @@ export default function App() {
     const v = headingVectorCanvas(h, 22);
     drawArrow(ctx, c.cx, c.cy, c.cx + v.dx, c.cy + v.dy, "#ffd166");
   }
-
 
   // Geometry helpers
   function getSegmentProgress(pts, dist) {
@@ -355,36 +345,15 @@ export default function App() {
   }
 
   function headingAtWaypoint(k) {
-    // waypoints = [start, ...points]; waypoint 0 uses startPose.h, waypoint j>0 uses points[j-1] heading
+    // waypoint 0 uses startPose.h, waypoint j>0 uses points[j-1].h (frozen)
     if (k === 0) return num(startPose.h);
-    return resolveHeadingAt(k - 1);
-  }
-
-  function getPointAtDistance(pts, dist) {
-    const g = getSegmentProgress(pts, dist);
-    return g ? { x: g.pos.x, y: g.pos.y, h: headingFromDelta(g.b.x - g.a.x, g.b.y - g.a.y) } : null;
+    const idx = k - 1;
+    return num(points[idx]?.h ?? 0);
   }
 
   function polylineLength(pts) { let s = 0; for (let i = 1; i < pts.length; i++) s += Math.hypot(pts[i].x - pts[i-1].x, pts[i].y - pts[i-1].y); return s; }
 
-  function drawAxis(ctx) {
-    ctx.save(); ctx.strokeStyle = "#9db0d1"; ctx.fillStyle = "#9db0d1"; ctx.lineWidth = 2; const x0 = canvasSize - 96, y0 = canvasSize - 52;
-    drawArrow(ctx, x0, y0, x0, y0 - 28, "#9db0d1"); ctx.fillText("+X (forward)", x0 - 6, y0 - 34);
-    drawArrow(ctx, x0, y0, x0 - 28, y0, "#9db0d1"); ctx.fillText("+Y (left)", x0 - 84, y0 + 14);
-    ctx.fillText("+heading left", x0 - 18, y0 + 30); ctx.restore();
-  }
-
-  function resolveHeadingAt(i) {
-    const p = points[i]; if (mode === "straight") return p.h ?? 0; if (points.length <= 0) return num(startPose.h);
-    const prev = i === 0 ? { x: num(startPose.x), y: num(startPose.y) } : points[i - 1];
-    const dx = (p.x - prev.x), dy = (p.y - prev.y);
-    if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) return num(startPose.h);
-    if (mode === "tangent") return headingFromDelta(dx, dy);
-    if (mode === "orth-left") return perpendicularHeading(dx, dy, true);
-    if (mode === "orth-right") return perpendicularHeading(dx, dy, false);
-    return p.h ?? 0;
-  }
-
+  // Compute heading for PREVIEW / NEW points only (existing points are frozen)
   function computePreviewHeading(nx, ny) {
     if (mode === "straight") return endHeadingInput;
     const sx = num(startPose.x), sy = num(startPose.y), sh = num(startPose.h);
@@ -400,13 +369,20 @@ export default function App() {
   // ---------- Interactions ----------
   const snapStep = () => (customSnap && customSnap > 0) ? customSnap : snapInches;
 
+  // Place a single point (click or drag-add)
+  function placePointAt(x, y) {
+    const p = { x, y, h: computePreviewHeading(x, y) };
+    setPoints(prev => [...prev, p]);
+    lastDragRef.current = { x, y };
+  }
+
   function onCanvasMove(e) {
     const rect = e.currentTarget.getBoundingClientRect();
     const cx = (e.clientX - rect.left) * (canvasSize / rect.width);
     const cy = (e.clientY - rect.top) * (canvasSize / rect.height);
     const raw = canvasToWorld(cx, cy, center.x, center.y, ppi);
-
     const snapped = snapToCorner(raw.x, raw.y, snapStep());
+
     if (placeStart) {
       setPreview({ x: snapped.x, y: snapped.y, h: num(startPose.h) });
     } else {
@@ -416,6 +392,16 @@ export default function App() {
   }
 
   function onCanvasLeave() { setPreview(null); }
+
+  function onMouseDown(e) {
+    // Initialize drag baseline
+    const rect = e.currentTarget.getBoundingClientRect();
+    const cx = (e.clientX - rect.left) * (canvasSize / rect.width);
+    const cy = (e.clientY - rect.top) * (canvasSize / rect.height);
+    const raw = canvasToWorld(cx, cy, center.x, center.y, ppi);
+    const snap = snapToCorner(raw.x, raw.y, snapStep());
+  }
+  function onMouseUp() { setIsDrawing(false); lastDragRef.current = null; }
 
   function onCanvasClick(e) {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -428,9 +414,137 @@ export default function App() {
       setStartPose(sp => ({ ...sp, x: snap.x, y: snap.y })); setPlaceStart(false); return;
     }
 
-    const p = { x: snap.x, y: snap.y };
-    if (mode === "straight") p.h = endHeadingInput; else p.h = computePreviewHeading(snap.x, snap.y);
-    setPoints(prev => [...prev, p]);
+    if (shapeType === "line") {
+      placePointAt(snap.x, snap.y);
+      return;
+    }
+
+    // Curves: need prior anchor (start or last point)
+    const anchor = points.length > 0 ? points[points.length - 1] : { x: num(startPose.x), y: num(startPose.y) };
+
+    if (shapeType === "bezier") {
+      if (!bezierTemp) {
+        setBezierTemp({ control: { x: snap.x, y: snap.y } });
+      } else {
+        const control = bezierTemp.control;
+        const end = { x: snap.x, y: snap.y };
+        const samples = sampleQuadraticBezier(anchor, control, end);
+        addSampledPointsWithHeading(samples);
+        setBezierTemp(null);
+      }
+      return;
+    }
+
+    if (shapeType === "arc") {
+      if (!arcTemp) {
+        setArcTemp({ mid: { x: snap.x, y: snap.y } });
+      } else {
+        const mid = arcTemp.mid;
+        const end = { x: snap.x, y: snap.y };
+        const samples = sampleCircularArcThrough(anchor, mid, end);
+        addSampledPointsWithHeading(samples);
+        setArcTemp(null);
+      }
+      return;
+    }
+  }
+
+  function addSampledPointsWithHeading(samples) {
+    if (!samples || samples.length === 0) return;
+    // Compute headings per mode relative to local tangent (provided in sample.tangent if available)
+    setPoints(prev => {
+      const newPts = [...prev];
+      for (const s of samples) {
+        let h;
+        if (mode === "straight") {
+          h = endHeadingInput;
+        } else if (mode === "tangent") {
+          const vec = s.tangent ?? { dx: s.x - (newPts.length ? newPts[newPts.length - 1].x : startPose.x), dy: s.y - (newPts.length ? newPts[newPts.length - 1].y : startPose.y) };
+          h = headingFromDelta(vec.dx, vec.dy);
+        } else if (mode === "orth-left") {
+          const vec = s.tangent ?? { dx: s.x - (newPts.length ? newPts[newPts.length - 1].x : startPose.x), dy: s.y - (newPts.length ? newPts[newPts.length - 1].y : startPose.y) };
+          h = perpendicularHeading(vec.dx, vec.dy, true);
+        } else if (mode === "orth-right") {
+          const vec = s.tangent ?? { dx: s.x - (newPts.length ? newPts[newPts.length - 1].x : startPose.x), dy: s.y - (newPts.length ? newPts[newPts.length - 1].y : startPose.y) };
+          h = perpendicularHeading(vec.dx, vec.dy, false);
+        } else {
+          h = 0;
+        }
+        newPts.push({ x: s.x, y: s.y, h });
+      }
+      return newPts;
+    });
+  }
+
+  // Quadratic Bezier sampling (returns [{x,y,tangent:{dx,dy}}...], excludes anchor)
+  function sampleQuadraticBezier(A, C, B) {
+    const approxLen = Math.hypot(C.x - A.x, C.y - A.y) + Math.hypot(B.x - C.x, B.y - C.y);
+    const spacing = 1.0; // inches per sample
+    const n = clamp(Math.ceil(approxLen / spacing), 8, 200);
+    const out = [];
+    for (let i = 1; i <= n; i++) {
+      const t = i / n;
+      const omt = 1 - t;
+      const x = omt * omt * A.x + 2 * omt * t * C.x + t * t * B.x;
+      const y = omt * omt * A.y + 2 * omt * t * C.y + t * t * B.y;
+      const dx = 2 * omt * (C.x - A.x) + 2 * t * (B.x - C.x);
+      const dy = 2 * omt * (C.y - A.y) + 2 * t * (B.y - C.y);
+      out.push({ x, y, tangent: { dx, dy } });
+    }
+    return out;
+  }
+
+  // Circular arc through three points: A (anchor), M (mid), B (end)
+  function sampleCircularArcThrough(A, M, B) {
+    // Circumcenter formula
+    const x1 = A.x, y1 = A.y, x2 = M.x, y2 = M.y, x3 = B.x, y3 = B.y;
+    const d = 2 * (x1*(y2 - y3) + x2*(y3 - y1) + x3*(y1 - y2));
+    if (Math.abs(d) < 1e-6) {
+      // Degenerate: fall back to straight line interpolation
+      const len = Math.hypot(B.x - A.x, B.y - A.y);
+      const n = clamp(Math.ceil(len / 1.0), 8, 200);
+      const out = [];
+      for (let i = 1; i <= n; i++) {
+        const t = i / n;
+        const x = A.x + (B.x - A.x) * t;
+        const y = A.y + (B.y - A.y) * t;
+        const dx = (B.x - A.x), dy = (B.y - A.y);
+        out.push({ x, y, tangent: { dx, dy } });
+      }
+      return out;
+    }
+    const ux = ((x1*x1 + y1*y1)*(y2 - y3) + (x2*x2 + y2*y2)*(y3 - y1) + (x3*x3 + y3*y3)*(y1 - y2)) / d;
+    const uy = ((x1*x1 + y1*y1)*(x3 - x2) + (x2*x2 + y2*y2)*(x1 - x3) + (x3*x3 + y3*y3)*(x2 - x1)) / d;
+    const O = { x: ux, y: uy };
+
+    const thA = Math.atan2(y1 - uy, x1 - ux);
+    const thM = Math.atan2(y2 - uy, x2 - ux);
+    const thB = Math.atan2(y3 - uy, x3 - ux);
+
+    // Choose direction (ccw or cw) so that arc from A to B passes through M
+    const norm = (a) => (a % (2*Math.PI) + 2*Math.PI) % (2*Math.PI);
+    const spanCCW = (norm(thB) - norm(thA) + 2*Math.PI) % (2*Math.PI);
+    const mSpanCCW = (norm(thM) - norm(thA) + 2*Math.PI) % (2*Math.PI);
+    const passesCCW = mSpanCCW <= spanCCW + 1e-9;
+
+    let delta = passesCCW ? spanCCW : -((norm(thA) - norm(thB) + 2*Math.PI) % (2*Math.PI));
+    const r = Math.hypot(x1 - ux, y1 - uy);
+    const arcLen = Math.abs(r * delta);
+    const n = clamp(Math.ceil(arcLen / 1.0), 8, 240);
+
+    const out = [];
+    for (let i = 1; i <= n; i++) {
+      const t = i / n;
+      const th = thA + delta * t;
+      const x = ux + r * Math.cos(th);
+      const y = uy + r * Math.sin(th);
+      // Tangent vector derivative w.r.t theta; sign follows delta direction via th progression
+      const dth = delta > 0 ? 1 : -1; // direction for tangent orientation
+      const dx = -r * Math.sin(th) * dth;
+      const dy =  r * Math.cos(th) * dth;
+      out.push({ x, y, tangent: { dx, dy } });
+    }
+    return out;
   }
 
   function undoLast() { setPoints(prev => prev.slice(0, -1)); }
@@ -454,17 +568,24 @@ export default function App() {
 
   // ---------- Background controls ----------
   function handleFile(e) {
-    const file = e.target.files?.[0]; if (!file) return; const url = URL.createObjectURL(file); const img = new Image(); img.onload = () => setBgImg(img); img.src = url;
+    const file = e.target.files?.[0]; if (!file) return;
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => setBgImg(img);
+    img.src = url;
   }
-  function loadUrl() { if (!bgUrlInput) return; const img = new Image(); img.crossOrigin = "anonymous"; img.onload = () => setBgImg(img); img.src = bgUrlInput; }
-  function resetGrid() { setBgImg(null); setPoints([]); stopPreview(); }
+  function resetToDefaultImage() {
+    const img = new Image();
+    img.onload = () => setBgImg(img);
+    img.src = decodeField;
+  }
 
   // ---------- Export code ----------
   const code = useMemo(() => {
     const sx = toFixed(num(startPose.x));
     const sy = toFixed(num(startPose.y));
     const sh = toFixed(num(startPose.h));
-    const path = points.map((p) => ({ x: toFixed(p.x), y: toFixed(p.y), h: toFixed(p.h ?? 0) }));
+    const path = points.map((p) => ({ x: toFixed(p.x), y: toFixed(p.y), h: toFixed(num(p.h ?? 0)) }));
     const v = toFixed(velocity, 2);
     if (path.length === 0) return `// Add at least one point to export code.`;
     if (path.length === 1) {
@@ -493,157 +614,159 @@ setPositionDrive(path, ${v});`;
 
   // ---------- UI ----------
   return (
-      <div className="app">
-        <style>{styles}</style>
+    <div className="app">
+      <style>{styles}</style>
 
-        <div className="header">
-          <div className="brand">
-            <div className="logo" />
-            <div>
-              <div>FTC Path Planner <span className="badge">DECODE</span></div>
-              <div className="subtle">+X forward, +Y left, +heading left (CCW). Start→P1 segment shown.</div>
-            </div>
-          </div>
-          <div className="pill"><span>1 tile = 24 in</span><span className="badge">Field: 144" × 144"</span></div>
+      {/* Left controls */}
+      <div className="card controls">
+        <h3>Field Background</h3>
+        <div className="row">
+          <label className="small">Upload an image (.png .jpg .svg)</label>
+          <input className="input" type="file" accept="image/*" onChange={handleFile} />
+        </div>
+        <div className="grid two">
+          <button className="btn ghost" onClick={resetToDefaultImage}>Use default field image</button>
+          <select className="input" value={canvasSize} onChange={(e) => setCanvasSize(parseInt(e.target.value))}>
+            <option value={600}>Canvas: 600×600</option>
+            <option value={720}>Canvas: 720×720</option>
+            <option value={900}>Canvas: 900×900</option>
+          </select>
         </div>
 
-        {/* Left controls */}
-        <div className="card controls">
-          <h3>Field Background</h3>
-          <div className="row">
-            <label className="small">Upload an image (.png .jpg .svg)</label>
-            <input className="input" type="file" accept="image/*" onChange={handleFile} />
-          </div>
-          <div className="row inline">
-            <input className="input" placeholder="Paste image URL (official DECODE field render works well)" value={bgUrlInput} onChange={(e) => setBgUrlInput(e.target.value)} />
-            <button className="btn" onClick={loadUrl}>Load</button>
-          </div>
-          <div className="grid two">
-            <button className="btn ghost" onClick={resetGrid}>Use default grid</button>
-            <select className="input" value={canvasSize} onChange={(e) => setCanvasSize(parseInt(e.target.value))}>
-              <option value={600}>Canvas: 600×600</option>
-              <option value={720}>Canvas: 720×720</option>
-              <option value={900}>Canvas: 900×900</option>
+        <hr className="sep" />
+        <h3>Grid Overlay</h3>
+        <div className="grid two">
+          <div>
+            <label>Show grid</label>
+            <select className="input" value={showGrid ? "on" : "off"} onChange={(e)=> setShowGrid(e.target.value === "on")}>
+              <option value="off">Off</option>
+              <option value="on">On</option>
             </select>
           </div>
-
-          <hr className="sep" />
-          <h3>Start Pose</h3>
-          <div className="grid three">
-            <div>
-              <label>X (in)</label>
-              <input
-                  className="number"
-                  type="text"
-                  value={String(startPose.x)}
-                  onChange={e => { const v = e.target.value; if (v === "" || v === "-") setStartPose({ ...startPose, x: v }); else { const n = parseFloat(v); if (!isNaN(n)) setStartPose({ ...startPose, x: n }); } }}
-              />
-            </div>
-            <div>
-              <label>Y (in)</label>
-              <input
-                  className="number"
-                  type="text"
-                  value={String(startPose.y)}
-                  onChange={e => { const v = e.target.value; if (v === "" || v === "-") setStartPose({ ...startPose, y: v }); else { const n = parseFloat(v); if (!isNaN(n)) setStartPose({ ...startPose, y: n }); } }}
-              />
-            </div>
-            <div>
-              <label>Heading (°)</label>
-              <input
-                  className="number"
-                  type="text"
-                  value={String(startPose.h)}
-                  onChange={e => { const v = e.target.value; if (v === "" || v === "-") setStartPose({ ...startPose, h: v }); else { const n = parseFloat(v); if (!isNaN(n)) setStartPose({ ...startPose, h: normDeg(n) }); } }}
-              />
-            </div>
+          <div>
+            <label>Grid step (in)</label>
+            <input className="number" type="number" min={0.25} step={0.25} value={gridStep} onChange={(e)=> setGridStep(Math.max(0.25, parseFloat(e.target.value)||24))}/>
           </div>
-          <button className="btn green" onClick={() => setPlaceStart(true)} title="Click the field to place the starting pose">Click to place start</button>
-          <div className="small">Tip: preview shows the snapped placement before you click.</div>
-
-          <hr className="sep" />
-          <h3>Path Mode</h3>
-          <div className="grid two">
-            <button onClick={() => setMode("straight")} className={`btn ${mode === "straight" ? "primary" : ""}`}>Straight + End Heading</button>
-            <button onClick={() => setMode("tangent")} className={`btn ${mode === "tangent" ? "primary" : ""}`}>Tangent (face forward)</button>
-          </div>
-          <div className="grid two">
-            <button onClick={() => setMode("orth-left")} className={`btn ${mode === "orth-left" ? "primary" : ""}`}>Orthogonal (left)</button>
-            <button onClick={() => setMode("orth-right")} className={`btn ${mode === "orth-right" ? "primary" : ""}`}>Orthogonal (right)</button>
-          </div>
-          {mode === "straight" && (
-              <div className="row"><label>Desired end heading for new points (°)</label><input className="number" type="number" value={endHeadingInput} onChange={e => setEndHeadingInput(normDeg(parseFloat(e.target.value)))} /></div>
-          )}
-
-          <div className="grid two">
-            <div><label>Velocity (in/s)</label><input className="number" type="number" value={velocity} step={1} min={1} max={120} onChange={e => setVelocity(parseFloat(e.target.value))} /></div>
-            <div><label>Snap (in)</label><select className="input" value={snapInches} onChange={e => setSnapInches(parseFloat(e.target.value))}><option value={0}>Off</option><option value={0.5}>0.5</option><option value={1}>1</option><option value={2}>2</option><option value={6}>6</option><option value={12}>12</option><option value={24}>24 (tiles)</option></select></div>
-          </div>
-          <div className="grid two">
-            <div>
-              <label>Custom snap (in)</label>
-              <input className="number" type="number" value={customSnap} step={0.1} min={0} onChange={e => setCustomSnap(parseFloat(e.target.value))} />
-              <div className="small">Set to 0 to disable; when &gt;0 it overrides the dropdown.</div>
-            </div>
-            <div>
-              <label>Preview speed (in/s)</label>
-              <input className="number" type="number" value={playSpeed} step={1} min={1} max={120} onChange={e => setPlaySpeed(parseFloat(e.target.value))} />
-              <div className="small">Playback robot speed along the path.</div>
-            </div>
-          </div>
-          <div className="grid three">
-            <button className={`btn ${playState === 'playing' ? 'primary' : ''}`} onClick={playPreview}>▶ Play</button>
-            <button className="btn" onClick={pausePreview}>{playState === 'playing' ? '⏸ Pause' : '⏯ Resume'}</button>
-            <button className="btn danger" onClick={stopPreview}>⏹ Stop</button>
-          </div>
-          <div className="small">Progress: {totalLen > 0 ? Math.round((playDist / totalLen) * 100) : 0}% ({toFixed(playDist,1)}in / {toFixed(totalLen,1)}in)</div>
-
-          <hr className="sep" />
-          <h3>Robot Footprint</h3>
-          <div className="grid two">
-            <div><label>Length L (in) <small>(front↔back, +x)</small></label><input className="number" type="number" value={robotL} min={1} max={36} step={0.5} onChange={e => setRobotL(parseFloat(e.target.value))} /></div>
-            <div><label>Width W (in) <small>(left↔right, +y)</small></label><input className="number" type="number" value={robotW} min={1} max={36} step={0.5} onChange={e => setRobotW(parseFloat(e.target.value))} /></div>
-          </div>
-
-          <div className="grid two" style={{marginTop: 8}}>
-            <button className="btn warn" onClick={undoLast}>Undo point</button>
-            <button className="btn danger" onClick={clearAll}>Clear path</button>
-          </div>
-
-          <div className="help small"><p><span className="kbd">Move</span> the mouse to see a faded preview (snapped to grid anchored at the field corner). <span className="kbd">Click</span> to place.</p></div>
         </div>
 
-        {/* Center canvas */}
-        <div className="canvasWrap">
-          <div className="canvasTop"><span className="badge">Draw: click to add points</span><span className="badge">(0,0) at center</span></div>
+        <hr className="sep" />
+        <h3>Start Pose</h3>
+        <div className="grid three">
+          <div>
+            <label>X (in)</label>
+            <input
+              className="number"
+              type="text"
+              value={String(startPose.x)}
+              onChange={e => { const v = e.target.value; if (v === "" || v === "-") setStartPose({ ...startPose, x: v }); else { const n = parseFloat(v); if (!isNaN(n)) setStartPose({ ...startPose, x: n }); } }}
+            />
+          </div>
+          <div>
+            <label>Y (in)</label>
+            <input
+              className="number"
+              type="text"
+              value={String(startPose.y)}
+              onChange={e => { const v = e.target.value; if (v === "" || v === "-") setStartPose({ ...startPose, y: v }); else { const n = parseFloat(v); if (!isNaN(n)) setStartPose({ ...startPose, y: n }); } }}
+            />
+          </div>
+          <div>
+            <label>Heading (°)</label>
+            <input
+              className="number"
+              type="text"
+              value={String(startPose.h)}
+              onChange={e => { const v = e.target.value; if (v === "" || v === "-") setStartPose({ ...startPose, h: v }); else { const n = parseFloat(v); if (!isNaN(n)) setStartPose({ ...startPose, h: normDeg(n) }); } }}
+            />
+          </div>
+        </div>
+        <button className="btn green" onClick={() => setPlaceStart(true)} title="Click the field to place the starting pose">Click to place start</button>
+
+        <hr className="sep" />
+        <h3>Heading Mode</h3>
+        <div className="grid two">
+          <button onClick={() => setMode("straight")} className={`btn ${mode === "straight" ? "primary" : ""}`}>Straight + End Heading</button>
+          <button onClick={() => setMode("tangent")} className={`btn ${mode === "tangent" ? "primary" : ""}`}>Tangent (face forward)</button>
+        </div>
+        <div className="grid two">
+          <button onClick={() => setMode("orth-left")} className={`btn ${mode === "orth-left" ? "primary" : ""}`}>Orthogonal (left)</button>
+          <button onClick={() => setMode("orth-right")} className={`btn ${mode === "orth-right" ? "primary" : ""}`}>Orthogonal (right)</button>
+        </div>
+        {mode === "straight" && (
+          <div className="row"><label>End heading for new points (°)</label><input className="number" type="number" value={endHeadingInput} onChange={e => setEndHeadingInput(normDeg(parseFloat(e.target.value)))} /></div>
+        )}
+
+        <div className="grid two">
+          <div><label>Velocity (in/s)</label><input className="number" type="number" value={velocity} step={1} min={1} max={120} onChange={e => setVelocity(parseFloat(e.target.value))} /></div>
+          <div><label>Snap (in)</label><select className="input" value={snapInches} onChange={e => setSnapInches(parseFloat(e.target.value))}><option value={0}>Off</option><option value={0.5}>0.5</option><option value={1}>1</option><option value={2}>2</option><option value={6}>6</option><option value={12}>12</option><option value={24}>24</option></select></div>
+        </div>
+        <div className="grid two">
+          <div>
+            <label>Custom snap (in)</label>
+            <input className="number" type="number" value={customSnap} step={0.1} min={0} onChange={e => setCustomSnap(parseFloat(e.target.value))} />
+          </div>
+          <div>
+            <label>Preview speed (in/s)</label>
+            <input className="number" type="number" value={playSpeed} step={1} min={1} max={120} onChange={e => setPlaySpeed(parseFloat(e.target.value))} />
+          </div>
+        </div>
+        <div className="grid three">
+          <button className={`btn ${playState === 'playing' ? 'primary' : ''}`} onClick={playPreview}>▶ Play</button>
+          <button className="btn" onClick={pausePreview}>{playState === 'playing' ? '⏸ Pause' : '⏯ Resume'}</button>
+          <button className="btn danger" onClick={stopPreview}>⏹ Stop</button>
+        </div>
+        <div className="small">Progress: {totalLen > 0 ? Math.round((playDist / totalLen) * 100) : 0}% ({toFixed(playDist,1)}in / {toFixed(totalLen,1)}in)</div>
+      </div>
+
+      {/* Center canvas */}
+      <div className="canvasWrap">
+        <div
+          className="canvasStack"
+          style={{ width: `${canvasSize}px`, height: `${canvasSize}px` }}
+        >
           <canvas
-              ref={canvasRef}
-              width={canvasSize}
-              height={canvasSize}
-              onMouseMove={onCanvasMove}
-              onMouseLeave={onCanvasLeave}
-              onClick={onCanvasClick}
-              style={{ display: 'block' }}
+            ref={canvasRef}
+            width={canvasSize}
+            height={canvasSize}
+            onMouseMove={onCanvasMove}
+            onMouseLeave={onCanvasLeave}
+            onClick={onCanvasClick}
+            style={{ display: 'block' }}
           />
           <canvas ref={overlayRef} width={canvasSize} height={canvasSize} style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none' }} />
         </div>
+      </div>
 
-        {/* Right export panel */}
-        <div className="card">
-          <h3>Export: Pose2D & setPositionDrive</h3>
-          <div className="grid two" style={{ marginBottom: 8 }}>
-            <div className="pill">Pose: <b>new Pose2D(DistanceUnit.INCH, x, y, AngleUnit.DEGREES, heading)</b></div>
-            <button className="btn" onClick={copyCode}>Copy</button>
-          </div>
-          <div className="codebox">{code}</div>
-          <hr className="sep" />
-          <div className="small help">
-            <p><b>Note</b>: The first line in comments shows your starting pose for reference; the path array includes only the clicked points. Coordinates are inches; headings are degrees (CCW/+left).</p>
-            <p>Upload a DECODE field render or paste a URL; the image auto-scales to the square canvas while keeping the FTC grid consistent.</p>
-          </div>
+      {/* Right export / tools panel */}
+      <div className="card">
+        <div className="row inline" style={{ marginBottom: 8 }}>
+          <button className="btn" onClick={copyCode}>Copy</button>
+          <div />
+        </div>
+        <div className="codebox">{code}</div>
+
+        <hr className="sep" />
+        <h3>Segment Type</h3>
+        <div className="grid three">
+          <button className={`btn ${shapeType==='line' ? 'primary':''}`} onClick={()=>{ setShapeType('line'); setBezierTemp(null); setArcTemp(null); }}>Line</button>
+          <button className={`btn ${shapeType==='bezier' ? 'primary':''}`} onClick={()=>{ setShapeType('bezier'); setArcTemp(null); }}>Quadratic Bezier</button>
+          <button className={`btn ${shapeType==='arc' ? 'primary':''}`} onClick={()=>{ setShapeType('arc'); setBezierTemp(null); }}>Circular Arc</button>
         </div>
 
-        <footer>Built for FTC path planning • +X forward, +Y left, +heading left • 1 tile = 24" • 12×12 tiles</footer>
+        <hr className="sep" />
+        <h3>Robot Footprint</h3>
+        <div className="grid two">
+          <div><label>Length L (in) <small>(+x)</small></label><input className="number" type="number" value={robotL} min={1} max={36} step={0.5} onChange={e => setRobotL(parseFloat(e.target.value))} /></div>
+          <div><label>Width W (in) <small>(+y)</small></label><input className="number" type="number" value={robotW} min={1} max={36} step={0.5} onChange={e => setRobotW(parseFloat(e.target.value))} /></div>
+        </div>
+
+        <div className="grid two" style={{marginTop: 8}}>
+          <button className="btn warn" onClick={undoLast}>Undo point</button>
+          <button className="btn danger" onClick={clearAll}>Clear path</button>
+        </div>
       </div>
+
+      <footer>FTC path planning • +X forward, +Y left, +heading left • 1 tile = 24" • 12×12 tiles</footer>
+    </div>
   );
 }
