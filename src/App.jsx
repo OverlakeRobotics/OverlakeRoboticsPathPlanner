@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 /**
- * FTC Path Planner – DECODE-ready (v4)
+ * FTC Path Planner – DECODE-ready (v4.1)
  *
  * New in this version:
  * • Interactive PATH PREVIEW with Play / Pause / Stop — robot animates along the path at a set speed
- * • Heading interpolates linearly from start→final across the ENTIRE path (e.g., 0°→90° ⇒ 45° halfway)
+ * • Heading interpolates linearly from the START heading to the SECOND point's target heading (index 1)
+ *   across the ENTIRE path (e.g., 0°→90° ⇒ 45° halfway). If fewer than 2 points, it targets the last point's heading.
  * • Custom snap value (in); if >0 it overrides the dropdown. Snap is anchored to field corner (-72,-72)
  * • Robot footprint only on the LAST point while drawing (plus live faded preview when hovering)
  * • Export formatting: one Pose2D per line in the array
@@ -65,13 +66,10 @@ const num = (v) => (typeof v === 'number' ? v : (isNaN(parseFloat(v)) ? 0 : pars
 function degToRad(d) { return (d * Math.PI) / 180; }
 function radToDeg(r) { return (r * 180) / Math.PI; }
 function normDeg(d) { let a = d % 360; if (a > 180) a -= 360; if (a <= -180) a += 360; return a; }
-
-function shortestDeltaDeg(a, b) { // shortest signed delta from a->b
-  let d = ((b - a + 540) % 360) - 180; // in (-180,180]
-  return d;
-}
+function shortestDeltaDeg(a, b) { let d = ((b - a + 540) % 360) - 180; return d; }
 
 // Map world (inches): +x forward (up), +y left (left)  ==> canvas (px): +cx right, +cy down
+// canvasX = centerX - y * ppi; canvasY = centerY - x * ppi
 function worldToCanvas(x, y, centerX, centerY, ppi) { return { cx: centerX - y * ppi, cy: centerY - x * ppi }; }
 function canvasToWorld(cx, cy, centerX, centerY, ppi) { return { x: (centerY - cy) / ppi, y: (centerX - cx) / ppi }; }
 
@@ -120,7 +118,6 @@ export default function App() {
   const [robotW, setRobotW] = useState(18);
 
   // Live hover preview
-  const [mouseWorld, setMouseWorld] = useState({ x: 0, y: 0 });
   const [preview, setPreview] = useState(null); // {x,y,h}
 
   // PATH PREVIEW animation
@@ -138,11 +135,11 @@ export default function App() {
 
   const totalLen = useMemo(() => polylineLength(waypoints), [waypoints]);
 
-  // Final heading target (resolve heading at last point)
-  const finalHeading = useMemo(() => {
-    if (points.length === 0) return num(startPose.h);
-    const idx = points.length - 1;
-    return resolveHeadingAt(idx);
+  // Rotation preview target: heading of the SECOND point (index 1). If fewer points, fallbacks.
+  const previewTargetHeading = useMemo(() => {
+    if (points.length >= 2) return resolveHeadingAt(1); // heading at second clicked point
+    if (points.length === 1) return resolveHeadingAt(0);
+    return num(startPose.h);
   }, [points, startPose, mode]);
 
   // Hi-DPI scaling
@@ -168,16 +165,13 @@ export default function App() {
   useEffect(() => {
     if (playState !== "playing") return;
     const loop = (ts) => {
-      if (playState !== "playing") return; // guard
+      if (playState !== "playing") return;
       if (!lastTsRef.current) lastTsRef.current = ts;
       const dt = (ts - lastTsRef.current) / 1000;
       lastTsRef.current = ts;
       setPlayDist(prev => {
         const nd = Math.min(prev + Math.max(0, playSpeed) * dt, totalLen || 0);
-        if (nd >= (totalLen || 0)) {
-          // reached end — pause at end
-          setPlayState("paused");
-        }
+        if (nd >= (totalLen || 0)) setPlayState("paused");
         return nd;
       });
       rafRef.current = requestAnimationFrame(loop);
@@ -221,7 +215,7 @@ export default function App() {
     drawPreview(octx);
     drawPlaybackRobot(octx);
     drawAxis(octx);
-  }, [bgImg, canvasSize, dpr, ppi, center, points, startPose, mode, robotL, robotW, preview, playState, playDist, totalLen, finalHeading]);
+  }, [bgImg, canvasSize, dpr, ppi, center, points, startPose, mode, robotL, robotW, preview, playState, playDist, totalLen, previewTargetHeading]);
 
   function drawGrid(ctx) {
     const tileIn = 24; ctx.save(); ctx.lineWidth = 1.2; ctx.strokeStyle = "#334155";
@@ -318,36 +312,57 @@ export default function App() {
 
   function drawPlaybackRobot(ctx) {
     if (playState === "stopped" || points.length === 0 || totalLen <= 0) return;
-    const t = clamp(totalLen === 0 ? 0 : playDist / totalLen, 0, 1);
-    const pos = getPointAtDistance(waypoints, playDist);
-    if (!pos) return;
 
-    // Heading interpolates across whole path start->final (shortest arc)
-    const sh = num(startPose.h);
-    const delta = shortestDeltaDeg(sh, finalHeading);
-    const h = normDeg(sh + delta * t);
+    // Where are we along the polyline, and which segment is it?
+    const g = getSegmentProgress(waypoints, playDist);
+    if (!g) return;
+    const { pos, i, t } = g; // segment index i, local param t in [0..1]
 
-    // Draw robot footprint + heading arrow at pos
+    // Heading should rotate from hi to hi+1 over THIS segment only
+    const h0 = headingAtWaypoint(i);
+    const h1 = headingAtWaypoint(i + 1);
+    const delta = shortestDeltaDeg(h0, h1);
+    const h = normDeg(h0 + delta * t); // constant deg/s because t advances at constant in/s
+
+    // Draw robot footprint + heading arrow
     drawRectFootprint(ctx, pos.x, pos.y, h, robotL, robotW, { fill: "#ffe08a", stroke: "#ffd166", alpha: 0.16 });
     const c = worldToCanvas(pos.x, pos.y, center.x, center.y, ppi);
-    const v = headingVectorCanvas(h, 22); drawArrow(ctx, c.cx, c.cy, c.cx + v.dx, c.cy + v.dy, "#ffd166");
+    const v = headingVectorCanvas(h, 22);
+    drawArrow(ctx, c.cx, c.cy, c.cx + v.dx, c.cy + v.dy, "#ffd166");
   }
 
+
   // Geometry helpers
-  function getPointAtDistance(pts, dist) {
+  function getSegmentProgress(pts, dist) {
     if (!pts || pts.length < 2) return null;
-    let d = clamp(dist, 0, polylineLength(pts));
+    const total = polylineLength(pts);
+    let d = clamp(dist, 0, total);
     for (let i = 0; i < pts.length - 1; i++) {
       const a = pts[i], b = pts[i + 1];
       const seg = Math.hypot(b.x - a.x, b.y - a.y);
       if (seg <= 1e-6) continue;
       if (d <= seg) {
-        const t = d / seg; return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, h: headingFromDelta(b.x - a.x, b.y - a.y) };
-      } else { d -= seg; }
+        const t = seg === 0 ? 0 : d / seg; // 0..1 along current segment
+        return { i, t, a, b, segLen: seg, pos: { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t } };
+      } else {
+        d -= seg;
+      }
     }
-    // at end
-    const a = pts[pts.length - 2], b = pts[pts.length - 1];
-    return { x: b.x, y: b.y, h: headingFromDelta(b.x - a.x, b.y - a.y) };
+    // At end
+    const i = pts.length - 2, a = pts[i], b = pts[i + 1];
+    const segLen = Math.hypot(b.x - a.x, b.y - a.y);
+    return { i, t: 1, a, b, segLen, pos: { x: b.x, y: b.y } };
+  }
+
+  function headingAtWaypoint(k) {
+    // waypoints = [start, ...points]; waypoint 0 uses startPose.h, waypoint j>0 uses points[j-1] heading
+    if (k === 0) return num(startPose.h);
+    return resolveHeadingAt(k - 1);
+  }
+
+  function getPointAtDistance(pts, dist) {
+    const g = getSegmentProgress(pts, dist);
+    return g ? { x: g.pos.x, y: g.pos.y, h: headingFromDelta(g.b.x - g.a.x, g.b.y - g.a.y) } : null;
   }
 
   function polylineLength(pts) { let s = 0; for (let i = 1; i < pts.length; i++) s += Math.hypot(pts[i].x - pts[i-1].x, pts[i].y - pts[i-1].y); return s; }
@@ -390,7 +405,6 @@ export default function App() {
     const cx = (e.clientX - rect.left) * (canvasSize / rect.width);
     const cy = (e.clientY - rect.top) * (canvasSize / rect.height);
     const raw = canvasToWorld(cx, cy, center.x, center.y, ppi);
-    setMouseWorld(raw);
 
     const snapped = snapToCorner(raw.x, raw.y, snapStep());
     if (placeStart) {
@@ -465,7 +479,7 @@ setPositionDrive(
     }
     const arr = path
         .map(p => `new Pose2D(DistanceUnit.INCH, ${p.x}, ${p.y}, AngleUnit.DEGREES, ${p.h})`)
-        .join(",");
+        .join(",\n    ");
     return `// Starting Pose (reference)
 // new Pose2D(DistanceUnit.INCH, ${sx}, ${sy}, AngleUnit.DEGREES, ${sh});
 
@@ -602,7 +616,15 @@ setPositionDrive(path, ${v});`;
         {/* Center canvas */}
         <div className="canvasWrap">
           <div className="canvasTop"><span className="badge">Draw: click to add points</span><span className="badge">(0,0) at center</span></div>
-          <canvas ref={canvasRef} width={canvasSize} height={canvasSize} onMouseMove={onCanvasMove} onMouseLeave={onCanvasLeave} onClick={onCanvasClick} style={{ display: 'block' }} />
+          <canvas
+              ref={canvasRef}
+              width={canvasSize}
+              height={canvasSize}
+              onMouseMove={onCanvasMove}
+              onMouseLeave={onCanvasLeave}
+              onClick={onCanvasClick}
+              style={{ display: 'block' }}
+          />
           <canvas ref={overlayRef} width={canvasSize} height={canvasSize} style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none' }} />
         </div>
 
