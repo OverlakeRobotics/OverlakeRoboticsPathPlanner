@@ -693,7 +693,15 @@ setPositionDrive(path, ${v});`;
           <button onClick={() => setMode("orth-right")} className={`btn ${mode === "orth-right" ? "primary" : ""}`}>Orthogonal (right)</button>
         </div>
         {mode === "straight" && (
-          <div className="row"><label>End heading for new points (°)</label><input className="number" type="number" value={endHeadingInput} onChange={e => setEndHeadingInput(normDeg(parseFloat(e.target.value)))} /></div>
+            <div className="row">
+              <label>Desired end heading for new points (°)</label>
+              <input
+                  className="number"
+                  type="text"
+                  value={String(endHeadingInput)}
+                  onChange={e => { const v = e.target.value; if (v === "" || v === "-") setEndHeadingInput(v); else { const n = parseFloat(v); if (!isNaN(n)) setEndHeadingInput(normDeg(n)); } }}
+              />
+            </div>
         )}
 
         <div className="grid two">
