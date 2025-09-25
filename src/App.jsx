@@ -657,7 +657,6 @@ export default function App() {
   function placePointAt(x, y) {
     const p = { x, y, h: computePreviewHeading(x, y), showHeading: true };
     appendPointsBatch([p], { type: 'point' });
-    lastDragRef.current = { x, y };
   }
 
   function onCanvasMove(e) {
@@ -685,7 +684,7 @@ export default function App() {
     const raw = canvasToWorld(cx, cy, center.x, center.y, ppi);
     const snap = snapToCorner(raw.x, raw.y, snapStep());
   }
-  function onMouseUp() { setIsDrawing(false); lastDragRef.current = null; }
+  function onMouseUp() { setIsDrawing(false); }
 
   function onCanvasClick(e) {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -921,10 +920,20 @@ export default function App() {
     img.onload = () => setBgImg(img);
     img.src = url;
   }
+
   function resetToDefaultImage() {
     const img = new Image();
     img.onload = () => setBgImg(img);
     img.src = decodeField;
+  }
+
+  async function uploadPoints(points) {
+    const ROBOT_IP = "192.168.43.1"; // Control Hub AP default
+    await fetch(`http://${ROBOT_IP}:8081/points`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(points)
+    });
   }
 
   // ---------- Export code ----------
@@ -932,30 +941,27 @@ export default function App() {
     const sx = toFixed(num(startPose.x));
     const sy = toFixed(num(startPose.y));
     const sh = toFixed(num(startPose.h));
-    const path = points.map((p) => ({ x: toFixed(p.x), y: toFixed(p.y), h: toFixed(num(p.h ?? 0)) }));
-    const v = toFixed(velocity, 2);
+    const path = points.map((p) => ({
+      x: toFixed(p.x),
+      y: toFixed(p.y),
+      h: toFixed(num(p.h ?? 0)),
+    }));
+
     if (path.length === 0) return `// Add at least one point to export code.`;
-    if (path.length === 1) {
-      const p = path[0];
-      return `// Starting Pose (reference)
-// new Pose2D(DistanceUnit.INCH, ${sx}, ${sy}, AngleUnit.DEGREES, ${sh});
 
-setPositionDrive(
-  new Pose2D(DistanceUnit.INCH, ${p.x}, ${p.y}, AngleUnit.DEGREES, ${p.h}),
-  ${v}
-);`;
-    }
-    const arr = path
-        .map(p => `new Pose2D(DistanceUnit.INCH, ${p.x}, ${p.y}, AngleUnit.DEGREES, ${p.h})`)
-        .join(",\n    ");
-    return `// Starting Pose (reference)
-// new Pose2D(DistanceUnit.INCH, ${sx}, ${sy}, AngleUnit.DEGREES, ${sh});
+    const poses = [
+      `new Pose2D(DistanceUnit.INCH, ${sx}, ${sy}, AngleUnit.DEGREES, ${sh})`,
+      ...path.map(
+        (p) =>
+          `new Pose2D(DistanceUnit.INCH, ${p.x}, ${p.y}, AngleUnit.DEGREES, ${p.h})`
+      ),
+    ].join(",\n    ");
 
-Pose2D[] path = new Pose2D[]{
-    ${arr}
-};
-setPositionDrive(path, ${v});`;
-  }, [points, velocity, startPose]);
+    return `public static Pose2D[] path = new Pose2D[] {
+    ${poses}
+};`;
+  }, [points, startPose]);
+
 
   function triggerCopiedFeedback() {
     if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
@@ -1098,9 +1104,26 @@ setPositionDrive(path, ${v});`;
 
       {/* Right panel: export/tools + Start Pose & Grid Overlay moved here */}
       <div className="card side-panel">
-        <div className="row inline" style={{ marginBottom: 8 }}>
-          <button className={`btn ${copied ? 'primary' : ''}`} onClick={copyCode}>{copied ? 'Copied!' : 'Copy'}</button>
-          <div />
+        <div className="row inline" style={{ marginBottom: 8, justifyContent: "space-between" }}>
+          <button
+            className={`btn ${copied ? 'primary' : ''}`}
+            onClick={copyCode}
+          >
+            {copied ? 'Copied!' : 'Copy'}
+          </button>
+
+          <button
+            className="btn"
+            onClick={() => {
+              const start = [num(startPose.x), num(startPose.y), num(startPose.h)];
+              const rest = points.map(p => [Number(p.x), Number(p.y), Number(p.h ?? 0)]);
+              const payload = [start, ...rest];
+              uploadPoints(payload).catch(err => console.error("Upload failed:", err));
+            }}
+            title="Send start + points to robot"
+          >
+            Upload
+          </button>
         </div>
         <div className="codebox">{code}</div>
 
