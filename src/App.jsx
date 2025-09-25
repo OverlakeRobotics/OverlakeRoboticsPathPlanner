@@ -50,6 +50,63 @@ body{ margin:0; background:radial-gradient(1200px 800px at 80% -20%, #1f2a4a, #0
 hr.sep{ border:none; height:1px; background:linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.18), rgba(255,255,255,0)); margin:8px 0; }
 label small{ color:var(--muted); }
 footer{ grid-column:1/-1; text-align:center; color:var(--muted); padding-top:4px; font-size:12px; }
+
+/* --- Right panel spacing fix --- */
+.card.side-panel{
+  display:flex;
+  flex-direction:column;
+  gap:14px;                 /* consistent vertical rhythm */
+}
+
+.card.side-panel h3{
+  margin: 6px 0 4px;        /* tighter section headers */
+}
+
+/* make all inputs/selects stretch uniformly */
+.card.side-panel .number,
+.card.side-panel .input,
+.card.side-panel select{
+  width:100%;
+}
+
+/* consistent grid gaps */
+.card.side-panel .grid{
+  display:grid;
+  gap:10px 12px;
+}
+
+.card.side-panel .grid.two{
+  grid-template-columns:1fr 1fr;
+}
+
+.card.side-panel .grid.three{
+  grid-template-columns:repeat(3,1fr);
+}
+
+/* inline row at top (Copy button) */
+.card.side-panel .row.inline{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin-bottom:0;
+}
+
+/* code box breathing room */
+.card.side-panel .codebox{
+  margin: 4px 0 2px;
+}
+
+/* buttons align and fill */
+.card.side-panel .grid.two .btn,
+.card.side-panel .grid.three .btn{
+  width:100%;
+}
+
+/* subtle spacing for small status text */
+.card.side-panel .small{
+  margin-top: -4px;
+}
+
 `;
 
 // ---------- Utilities ----------
@@ -939,71 +996,14 @@ setPositionDrive(path, ${v});`;
           </select>
         </div>
 
+        {/* Segment Type moved here, above Heading Mode */}
         <hr className="sep" />
-        <h3>Grid Overlay</h3>
-        <div className="grid two">
-          <div>
-            <label>Show grid</label>
-            <select className="input" value={showGrid ? "on" : "off"} onChange={(e)=> setShowGrid(e.target.value === "on")}>
-              <option value="off">Off</option>
-              <option value="on">On</option>
-            </select>
-          </div>
-          <div>
-            <label>Grid step (in)</label>
-            <input
-              className="number"
-              type="number"
-              min={0.25}
-              step={0.25}
-              value={gridStepEntry}
-              onChange={(e) => setGridStepEntry(e.target.value)}
-              onBlur={commitGridStepFromInput}
-              onKeyDown={(e) => { if (e.key === 'Enter') { commitGridStepFromInput(); e.currentTarget.blur(); } }}
-              disabled={!showGrid}
-              style={showGrid ? undefined : { opacity: 0.55 }}
-            />
-          </div>
-        </div>
-
-        <hr className="sep" />
-        <h3>Start Pose</h3>
+        <h3>Segment Type</h3>
         <div className="grid three">
-          <div>
-            <label>X (in)</label>
-            <input
-              className="number"
-              type="text"
-              value={String(startPose.x)}
-              onChange={e => { const v = e.target.value; if (v === "" || v === "-") setStartPose({ ...startPose, x: v }); else { const n = parseFloat(v); if (!isNaN(n)) setStartPose({ ...startPose, x: n }); } }}
-            />
-          </div>
-          <div>
-            <label>Y (in)</label>
-            <input
-              className="number"
-              type="text"
-              value={String(startPose.y)}
-              onChange={e => { const v = e.target.value; if (v === "" || v === "-") setStartPose({ ...startPose, y: v }); else { const n = parseFloat(v); if (!isNaN(n)) setStartPose({ ...startPose, y: n }); } }}
-            />
-          </div>
-          <div>
-            <label>Heading (°)</label>
-            <input
-              className="number"
-              type="text"
-              value={String(startPose.h)}
-              onChange={e => { const v = e.target.value; if (v === "" || v === "-") setStartPose({ ...startPose, h: v }); else { const n = parseFloat(v); if (!isNaN(n)) setStartPose({ ...startPose, h: normDeg(n) }); } }}
-            />
-          </div>
+          <button className={`btn ${shapeType==='line' ? 'primary':''}`} onClick={()=>{ setShapeType('line'); setBezierTemp(null); setArcTemp(null); }}>Line</button>
+          <button className={`btn ${shapeType==='bezier' ? 'primary':''}`} onClick={()=>{ setShapeType('bezier'); setArcTemp(null); }}>Quadratic Bezier</button>
+          <button className={`btn ${shapeType==='arc' ? 'primary':''}`} onClick={()=>{ setShapeType('arc'); setBezierTemp(null); }}>Circular Arc</button>
         </div>
-        <button
-          className={`btn green ${placeStart ? 'primary' : ''}`}
-          onClick={togglePlaceStart}
-          title={placeStart ? "Click the field to confirm the start pose" : "Click the field to place the starting pose"}
-        >
-          {placeStart ? 'Select start on field…' : 'Click to place start'}
-        </button>
 
         <hr className="sep" />
         <h3>Heading Mode</h3>
@@ -1016,15 +1016,15 @@ setPositionDrive(path, ${v});`;
           <button onClick={() => setMode("orth-right")} className={`btn ${mode === "orth-right" ? "primary" : ""}`}>Orthogonal (right)</button>
         </div>
         {mode === "straight" && (
-            <div className="row">
-              <label>Desired end heading for new points (°)</label>
-              <input
-                  className="number"
-                  type="text"
-                  value={String(endHeadingInput)}
-                  onChange={e => { const v = e.target.value; if (v === "" || v === "-") setEndHeadingInput(v); else { const n = parseFloat(v); if (!isNaN(n)) setEndHeadingInput(normDeg(n)); } }}
-              />
-            </div>
+          <div className="row">
+            <label>Desired end heading for new points (°)</label>
+            <input
+              className="number"
+              type="text"
+              value={String(endHeadingInput)}
+              onChange={e => { const v = e.target.value; if (v === "" || v === "-") setEndHeadingInput(v); else { const n = parseFloat(v); if (!isNaN(n)) setEndHeadingInput(normDeg(n)); } }}
+            />
+          </div>
         )}
 
         <div className="grid two">
@@ -1096,20 +1096,83 @@ setPositionDrive(path, ${v});`;
         </div>
       </div>
 
-      {/* Right export / tools panel */}
-      <div className="card">
+      {/* Right panel: export/tools + Start Pose & Grid Overlay moved here */}
+      <div className="card side-panel">
         <div className="row inline" style={{ marginBottom: 8 }}>
           <button className={`btn ${copied ? 'primary' : ''}`} onClick={copyCode}>{copied ? 'Copied!' : 'Copy'}</button>
           <div />
         </div>
         <div className="codebox">{code}</div>
 
+        <div className="grid two" style={{marginTop: 8}}>
+          <button className="btn warn" onClick={undoLast}>Undo</button>
+          <button className="btn danger" onClick={clearAll}>Clear path</button>
+        </div>
+
         <hr className="sep" />
-        <h3>Segment Type</h3>
+        <h3>Start Pose</h3>
         <div className="grid three">
-          <button className={`btn ${shapeType==='line' ? 'primary':''}`} onClick={()=>{ setShapeType('line'); setBezierTemp(null); setArcTemp(null); }}>Line</button>
-          <button className={`btn ${shapeType==='bezier' ? 'primary':''}`} onClick={()=>{ setShapeType('bezier'); setArcTemp(null); }}>Quadratic Bezier</button>
-          <button className={`btn ${shapeType==='arc' ? 'primary':''}`} onClick={()=>{ setShapeType('arc'); setBezierTemp(null); }}>Circular Arc</button>
+          <div>
+            <label>X (in)</label>
+            <input
+              className="number"
+              type="text"
+              value={String(startPose.x)}
+              onChange={e => { const v = e.target.value; if (v === "" || v === "-") setStartPose({ ...startPose, x: v }); else { const n = parseFloat(v); if (!isNaN(n)) setStartPose({ ...startPose, x: n }); } }}
+            />
+          </div>
+          <div>
+            <label>Y (in)</label>
+            <input
+              className="number"
+              type="text"
+              value={String(startPose.y)}
+              onChange={e => { const v = e.target.value; if (v === "" || v === "-") setStartPose({ ...startPose, y: v }); else { const n = parseFloat(v); if (!isNaN(n)) setStartPose({ ...startPose, y: n }); } }}
+            />
+          </div>
+          <div>
+            <label>Heading (°)</label>
+            <input
+              className="number"
+              type="text"
+              value={String(startPose.h)}
+              onChange={e => { const v = e.target.value; if (v === "" || v === "-") setStartPose({ ...startPose, h: v }); else { const n = parseFloat(v); if (!isNaN(n)) setStartPose({ ...startPose, h: normDeg(n) }); } }}
+            />
+          </div>
+        </div>
+        <button
+          className={`btn green ${placeStart ? 'primary' : ''}`}
+          onClick={togglePlaceStart}
+          title={placeStart ? "Click the field to confirm the start pose" : "Click the field to place the starting pose"}
+        >
+          {placeStart ? 'Select start on field…' : 'Click to place start'}
+        </button>
+
+        <hr className="sep" />
+        <h3>Grid Overlay</h3>
+        <div className="grid two">
+          <div>
+            <label>Show grid</label>
+            <select className="input" value={showGrid ? "on" : "off"} onChange={(e)=> setShowGrid(e.target.value === "on")}>
+              <option value="off">Off</option>
+              <option value="on">On</option>
+            </select>
+          </div>
+          <div>
+            <label>Grid step (in)</label>
+            <input
+              className="number"
+              type="number"
+              min={0.25}
+              step={0.25}
+              value={gridStepEntry}
+              onChange={(e) => setGridStepEntry(e.target.value)}
+              onBlur={commitGridStepFromInput}
+              onKeyDown={(e) => { if (e.key === 'Enter') { commitGridStepFromInput(); e.currentTarget.blur(); } }}
+              disabled={!showGrid}
+              style={showGrid ? undefined : { opacity: 0.55 }}
+            />
+          </div>
         </div>
 
         <hr className="sep" />
@@ -1117,11 +1180,6 @@ setPositionDrive(path, ${v});`;
         <div className="grid two">
           <div><label>Length L (in) <small>(+x)</small></label><input className="number" type="number" value={robotL} min={1} max={36} step={0.5} onChange={e => setRobotL(parseFloat(e.target.value))} /></div>
           <div><label>Width W (in) <small>(+y)</small></label><input className="number" type="number" value={robotW} min={1} max={36} step={0.5} onChange={e => setRobotW(parseFloat(e.target.value))} /></div>
-        </div>
-
-        <div className="grid two" style={{marginTop: 8}}>
-          <button className="btn warn" onClick={undoLast}>Undo</button>
-          <button className="btn danger" onClick={clearAll}>Clear path</button>
         </div>
       </div>
 
