@@ -56,6 +56,7 @@ footer{ grid-column:1/-1; text-align:center; color:var(--muted); padding-top:4px
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const toFixed = (n, p = 2) => Number(n).toFixed(p);
 const FIELD_EDGE = 72; // inches half-field extent
+const DEFAULT_GRID_STEP = 24;
 const num = (v) => (typeof v === 'number' ? v : (isNaN(parseFloat(v)) ? 0 : parseFloat(v)));
 
 function degToRad(d) { return (d * Math.PI) / 180; }
@@ -99,13 +100,14 @@ export default function App() {
   const [startPose, setStartPose] = useState({ x: 0, y: 0, h: 0 });
   const [placeStart, setPlaceStart] = useState(false);
   const [points, setPoints] = useState([]); // {x, y, h} with h frozen at creation
+  const [undoStack, setUndoStack] = useState([]); // stack of point batches for undo
 
   // Modes & params
   const [mode, setMode] = useState("straight"); // "straight" | "tangent" | "orth-left" | "orth-right"
   const [endHeadingInput, setEndHeadingInput] = useState(0); // for straight mode
   const [velocity, setVelocity] = useState(30);
-  const [snapInches, setSnapInches] = useState(1);
-  const [customSnap, setCustomSnap] = useState(1); // inches; 0 disables
+  const [snapOption, setSnapOption] = useState("3"); // preset snap selector
+  const [customSnap, setCustomSnap] = useState("1"); // inches when snapOption === 'custom'
 
   // Robot footprint (length along +x forward, width along +y left)
   const [robotL, setRobotL] = useState(18);
@@ -113,13 +115,16 @@ export default function App() {
 
   // Live hover preview
   const [preview, setPreview] = useState(null); // {x,y,h}
+  const [copied, setCopied] = useState(false);
 
   // PATH PREVIEW animation
   const [playState, setPlayState] = useState("stopped"); // 'stopped' | 'playing' | 'paused'
-  const [playSpeed, setPlaySpeed] = useState(12); // inches / second
+  const [playSpeed, setPlaySpeed] = useState(30); // inches / second
   const [playDist, setPlayDist] = useState(0); // distance traveled along path (in)
   const rafRef = useRef(null);
   const lastTsRef = useRef(0);
+  const undoHandlerRef = useRef(() => {});
+  const copyTimeoutRef = useRef(null);
 
   // Curve construction state
   const [shapeType, setShapeType] = useState("line"); // 'line' | 'bezier' | 'arc'
@@ -128,7 +133,8 @@ export default function App() {
 
   // Grid overlay
   const [showGrid, setShowGrid] = useState(false);
-  const [gridStep, setGridStep] = useState(24); // inches
+  const [gridStep, setGridStep] = useState(DEFAULT_GRID_STEP); // inches
+  const [gridStepEntry, setGridStepEntry] = useState(String(DEFAULT_GRID_STEP));
 
   // Derived: waypoints and total length
   const waypoints = useMemo(() => {
@@ -170,6 +176,31 @@ export default function App() {
   // Reset playback when path or start changes
   useEffect(() => { stopPreview(); }, [points, startPose.x, startPose.y, startPose.h]);
 
+  useEffect(() => { undoHandlerRef.current = undoLast; }, [undoLast]);
+
+  useEffect(() => () => { if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current); }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (evt) => {
+      if (!(evt.metaKey || evt.ctrlKey)) return;
+      if (evt.altKey) return;
+      if (evt.key?.toLowerCase() !== 'z') return;
+
+      const active = document.activeElement;
+      const tag = active?.tagName?.toLowerCase();
+      const isEditable = active && (active.isContentEditable || tag === 'input' || tag === 'textarea' || tag === 'select');
+      if (isEditable) return;
+
+      if (evt.shiftKey) return;
+
+      evt.preventDefault();
+      undoHandlerRef.current?.();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   // Draw routine
   useEffect(() => {
     const canvas = canvasRef.current; const overlay = overlayRef.current;
@@ -201,7 +232,7 @@ export default function App() {
     drawPointMarkersAndFootprints(octx);
     drawPreview(octx);
     drawPlaybackRobot(octx);
-  }, [bgImg, canvasSize, dpr, ppi, center, points, startPose, mode, robotL, robotW, preview, playState, playDist, totalLen, showGrid, gridStep]);
+  }, [bgImg, canvasSize, dpr, ppi, center, points, startPose, mode, robotL, robotW, preview, playState, playDist, totalLen, showGrid, gridStep, shapeType, arcTemp, bezierTemp, placeStart]);
 
   function drawGrid(ctx, stepIn) {
     const s = Math.max(0.1, stepIn);
@@ -239,6 +270,7 @@ export default function App() {
   }
 
   function drawStartMarker(ctx) {
+    if (placeStart) return;
     const sx = num(startPose.x), sy = num(startPose.y), sh = num(startPose.h);
     const { cx, cy } = worldToCanvas(sx, sy, center.x, center.y, ppi);
     ctx.save(); ctx.fillStyle = "#ffd166"; ctx.strokeStyle = "#ffc14b"; ctx.lineWidth = 2;
@@ -286,17 +318,142 @@ export default function App() {
   }
 
   function drawPreview(ctx) {
-    if (!preview) return;
     const sx = num(startPose.x), sy = num(startPose.y), sh = num(startPose.h);
     const prevAnchor = points.length > 0 ? points[points.length - 1] : { x: sx, y: sy, h: sh };
+
+    if (placeStart && preview) {
+      const pos = worldToCanvas(preview.x, preview.y, center.x, center.y, ppi);
+      ctx.save();
+      ctx.fillStyle = "#ffd166";
+      ctx.strokeStyle = "#ffc14b";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(pos.cx, pos.cy, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+      return;
+    }
+
+    if (shapeType === "bezier" && bezierTemp) {
+      ctx.save();
+      const anchorCanvas = worldToCanvas(prevAnchor.x, prevAnchor.y, center.x, center.y, ppi);
+      const control = bezierTemp.control;
+      const controlCanvas = worldToCanvas(control.x, control.y, center.x, center.y, ppi);
+
+      ctx.fillStyle = "#bae6fd";
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      ctx.arc(controlCanvas.cx, controlCanvas.cy, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      if (preview) {
+        const end = { x: preview.x, y: preview.y };
+        const samples = sampleQuadraticBezier(prevAnchor, control, end);
+        if (samples && samples.length) {
+          ctx.setLineDash([8, 6]);
+          ctx.strokeStyle = "#94a3b8";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(anchorCanvas.cx, anchorCanvas.cy);
+          for (const s of samples) {
+            const c = worldToCanvas(s.x, s.y, center.x, center.y, ppi);
+            ctx.lineTo(c.cx, c.cy);
+          }
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          const b = worldToCanvas(end.x, end.y, center.x, center.y, ppi);
+          ctx.globalAlpha = 0.8;
+          ctx.fillStyle = "#e2e8f0";
+          ctx.beginPath();
+          ctx.arc(b.cx, b.cy, 4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+
+          const vBezier = headingVectorCanvas(preview.h, 18);
+          drawArrow(ctx, b.cx, b.cy, b.cx + vBezier.dx, b.cy + vBezier.dy, "#94e2b8");
+          drawRectFootprint(ctx, preview.x, preview.y, preview.h, robotL, robotW, { fill: "#94e2b8", stroke: "#94e2b8", alpha: 0.10 });
+        }
+      }
+
+      ctx.restore();
+      return;
+    }
+
+    if (shapeType === "arc" && arcTemp) {
+      ctx.save();
+      const anchorCanvas = worldToCanvas(prevAnchor.x, prevAnchor.y, center.x, center.y, ppi);
+      const mid = arcTemp.mid;
+      const midCanvas = worldToCanvas(mid.x, mid.y, center.x, center.y, ppi);
+
+      // highlight locked midpoint so users know it's active
+      ctx.fillStyle = "#bae6fd";
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      ctx.arc(midCanvas.cx, midCanvas.cy, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      if (preview) {
+        const end = { x: preview.x, y: preview.y };
+        const samples = sampleCircularArcThrough(prevAnchor, mid, end);
+        if (samples && samples.length) {
+          ctx.setLineDash([8, 6]);
+          ctx.strokeStyle = "#94a3b8";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(anchorCanvas.cx, anchorCanvas.cy);
+          for (const s of samples) {
+            const c = worldToCanvas(s.x, s.y, center.x, center.y, ppi);
+            ctx.lineTo(c.cx, c.cy);
+          }
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          const b = worldToCanvas(end.x, end.y, center.x, center.y, ppi);
+          ctx.globalAlpha = 0.8;
+          ctx.fillStyle = "#e2e8f0";
+          ctx.beginPath();
+          ctx.arc(b.cx, b.cy, 4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+
+          const vArc = headingVectorCanvas(preview.h, 18);
+          drawArrow(ctx, b.cx, b.cy, b.cx + vArc.dx, b.cy + vArc.dy, "#94e2b8");
+          drawRectFootprint(ctx, preview.x, preview.y, preview.h, robotL, robotW, { fill: "#94e2b8", stroke: "#94e2b8", alpha: 0.10 });
+        }
+      }
+
+      ctx.restore();
+      return;
+    }
+
+    if (!preview) return;
+
     const a = worldToCanvas(prevAnchor.x, prevAnchor.y, center.x, center.y, ppi);
     const b = worldToCanvas(preview.x, preview.y, center.x, center.y, ppi);
-    // dashed segment
-    ctx.save(); ctx.setLineDash([8, 6]); ctx.strokeStyle = "#94a3b8"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(a.cx, a.cy); ctx.lineTo(b.cx, b.cy); ctx.stroke(); ctx.setLineDash([]);
-    // faded point
-    ctx.globalAlpha = 0.8; ctx.fillStyle = "#e2e8f0"; ctx.beginPath(); ctx.arc(b.cx, b.cy, 4, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
-    // preview arrow + footprint
-    const v = headingVectorCanvas(preview.h, 18); drawArrow(ctx, b.cx, b.cy, b.cx + v.dx, b.cy + v.dy, "#94e2b8");
+
+    ctx.save();
+    ctx.setLineDash([8, 6]);
+    ctx.strokeStyle = "#94a3b8";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(a.cx, a.cy);
+    ctx.lineTo(b.cx, b.cy);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.globalAlpha = 0.8;
+    ctx.fillStyle = "#e2e8f0";
+    ctx.beginPath();
+    ctx.arc(b.cx, b.cy, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    const v = headingVectorCanvas(preview.h, 18);
+    drawArrow(ctx, b.cx, b.cy, b.cx + v.dx, b.cy + v.dy, "#94e2b8");
     drawRectFootprint(ctx, preview.x, preview.y, preview.h, robotL, robotW, { fill: "#94e2b8", stroke: "#94e2b8", alpha: 0.10 });
     ctx.restore();
   }
@@ -367,12 +524,59 @@ export default function App() {
   }
 
   // ---------- Interactions ----------
-  const snapStep = () => (customSnap && customSnap > 0) ? customSnap : snapInches;
+  const snapStep = () => {
+    if (snapOption === "off") return 0;
+    if (snapOption === "custom") {
+      const parsedCustom = parseFloat(customSnap);
+      return Number.isFinite(parsedCustom) && parsedCustom > 0 ? parsedCustom : 0;
+    }
+    const preset = parseFloat(snapOption);
+    return Number.isFinite(preset) && preset > 0 ? preset : 0;
+  };
+
+  function commitGridStepFromInput() {
+    const parsed = parseFloat(gridStepEntry);
+    if (!gridStepEntry || !Number.isFinite(parsed) || parsed <= 0) {
+      setGridStep(DEFAULT_GRID_STEP);
+      setGridStepEntry(String(DEFAULT_GRID_STEP));
+    } else {
+      setGridStep(parsed);
+      setGridStepEntry(String(parsed));
+    }
+  }
+
+  function commitCustomSnap() {
+    if (snapOption !== "custom") return;
+    const parsed = parseFloat(customSnap);
+    if (!customSnap || !Number.isFinite(parsed) || parsed <= 0) {
+      setCustomSnap("1");
+    } else {
+      setCustomSnap(String(parsed));
+    }
+  }
+
+  function togglePlaceStart() {
+    setPreview(null);
+    setPlaceStart(prev => {
+      const next = !prev;
+      if (!prev) {
+        clearAll();
+      }
+      return next;
+    });
+  }
+
+  function appendPointsBatch(newPoints, meta = {}) {
+    if (!newPoints || newPoints.length === 0) return;
+    setPoints(prev => [...prev, ...newPoints]);
+    const entry = { ...meta, type: meta?.type ?? 'points', count: newPoints.length };
+    setUndoStack(prev => [...prev, entry]);
+  }
 
   // Place a single point (click or drag-add)
   function placePointAt(x, y) {
     const p = { x, y, h: computePreviewHeading(x, y) };
-    setPoints(prev => [...prev, p]);
+    appendPointsBatch([p], { type: 'point' });
     lastDragRef.current = { x, y };
   }
 
@@ -451,29 +655,34 @@ export default function App() {
 
   function addSampledPointsWithHeading(samples) {
     if (!samples || samples.length === 0) return;
-    // Compute headings per mode relative to local tangent (provided in sample.tangent if available)
-    setPoints(prev => {
-      const newPts = [...prev];
-      for (const s of samples) {
-        let h;
-        if (mode === "straight") {
-          h = endHeadingInput;
-        } else if (mode === "tangent") {
-          const vec = s.tangent ?? { dx: s.x - (newPts.length ? newPts[newPts.length - 1].x : startPose.x), dy: s.y - (newPts.length ? newPts[newPts.length - 1].y : startPose.y) };
+    const appended = [];
+    const sx = num(startPose.x);
+    const sy = num(startPose.y);
+    const straightHeading = num(endHeadingInput);
+    let prevPoint = points.length > 0 ? points[points.length - 1] : { x: sx, y: sy };
+
+    for (const s of samples) {
+      let h;
+      if (mode === "straight") {
+        h = straightHeading;
+      } else {
+        const fallback = { dx: s.x - prevPoint.x, dy: s.y - prevPoint.y };
+        const vec = s.tangent ?? fallback;
+        if (mode === "tangent") {
           h = headingFromDelta(vec.dx, vec.dy);
         } else if (mode === "orth-left") {
-          const vec = s.tangent ?? { dx: s.x - (newPts.length ? newPts[newPts.length - 1].x : startPose.x), dy: s.y - (newPts.length ? newPts[newPts.length - 1].y : startPose.y) };
           h = perpendicularHeading(vec.dx, vec.dy, true);
         } else if (mode === "orth-right") {
-          const vec = s.tangent ?? { dx: s.x - (newPts.length ? newPts[newPts.length - 1].x : startPose.x), dy: s.y - (newPts.length ? newPts[newPts.length - 1].y : startPose.y) };
           h = perpendicularHeading(vec.dx, vec.dy, false);
         } else {
           h = 0;
         }
-        newPts.push({ x: s.x, y: s.y, h });
       }
-      return newPts;
-    });
+      appended.push({ x: s.x, y: s.y, h });
+      prevPoint = { x: s.x, y: s.y };
+    }
+
+    appendPointsBatch(appended, { type: shapeType });
   }
 
   // Quadratic Bezier sampling (returns [{x,y,tangent:{dx,dy}}...], excludes anchor)
@@ -547,8 +756,25 @@ export default function App() {
     return out;
   }
 
-  function undoLast() { setPoints(prev => prev.slice(0, -1)); }
-  function clearAll() { setPoints([]); }
+  function undoLast() {
+    if (bezierTemp) { setBezierTemp(null); setPreview(null); return; }
+    if (arcTemp) { setArcTemp(null); setPreview(null); return; }
+    if (undoStack.length === 0) return;
+    const last = undoStack[undoStack.length - 1];
+    const removeCount = Math.max(0, last?.count ?? 0);
+    if (removeCount > 0) {
+      setPoints(prev => prev.slice(0, Math.max(0, prev.length - removeCount)));
+    }
+    setUndoStack(prev => prev.slice(0, -1));
+  }
+
+  function clearAll() {
+    setPoints([]);
+    setUndoStack([]);
+    setBezierTemp(null);
+    setArcTemp(null);
+    setPreview(null);
+  }
 
   // Playback controls
   function playPreview() {
@@ -610,7 +836,23 @@ Pose2D[] path = new Pose2D[]{
 setPositionDrive(path, ${v});`;
   }, [points, velocity, startPose]);
 
-  function copyCode() { navigator.clipboard?.writeText(code); }
+  function triggerCopiedFeedback() {
+    if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+    setCopied(true);
+    copyTimeoutRef.current = setTimeout(() => setCopied(false), 1600);
+  }
+
+  function copyCode() {
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(code).then(() => {
+        triggerCopiedFeedback();
+      }).catch(() => {
+        triggerCopiedFeedback();
+      });
+    } else {
+      triggerCopiedFeedback();
+    }
+  }
 
   // ---------- UI ----------
   return (
@@ -645,7 +887,18 @@ setPositionDrive(path, ${v});`;
           </div>
           <div>
             <label>Grid step (in)</label>
-            <input className="number" type="number" min={0.25} step={0.25} value={gridStep} onChange={(e)=> setGridStep(Math.max(0.25, parseFloat(e.target.value)||24))}/>
+            <input
+              className="number"
+              type="number"
+              min={0.25}
+              step={0.25}
+              value={gridStepEntry}
+              onChange={(e) => setGridStepEntry(e.target.value)}
+              onBlur={commitGridStepFromInput}
+              onKeyDown={(e) => { if (e.key === 'Enter') { commitGridStepFromInput(); e.currentTarget.blur(); } }}
+              disabled={!showGrid}
+              style={showGrid ? undefined : { opacity: 0.55 }}
+            />
           </div>
         </div>
 
@@ -680,7 +933,13 @@ setPositionDrive(path, ${v});`;
             />
           </div>
         </div>
-        <button className="btn green" onClick={() => setPlaceStart(true)} title="Click the field to place the starting pose">Click to place start</button>
+        <button
+          className={`btn green ${placeStart ? 'primary' : ''}`}
+          onClick={togglePlaceStart}
+          title={placeStart ? "Click the field to confirm the start pose" : "Click the field to place the starting pose"}
+        >
+          {placeStart ? 'Select start on field…' : 'Click to place start'}
+        </button>
 
         <hr className="sep" />
         <h3>Heading Mode</h3>
@@ -706,12 +965,40 @@ setPositionDrive(path, ${v});`;
 
         <div className="grid two">
           <div><label>Velocity (in/s)</label><input className="number" type="number" value={velocity} step={1} min={1} max={120} onChange={e => setVelocity(parseFloat(e.target.value))} /></div>
-          <div><label>Snap (in)</label><select className="input" value={snapInches} onChange={e => setSnapInches(parseFloat(e.target.value))}><option value={0}>Off</option><option value={0.5}>0.5</option><option value={1}>1</option><option value={2}>2</option><option value={6}>6</option><option value={12}>12</option><option value={24}>24</option></select></div>
+          <div>
+            <label>Snap (in)</label>
+            <select
+              className="input"
+              value={snapOption}
+              onChange={(e) => setSnapOption(e.target.value)}
+            >
+              <option value="off">Off</option>
+              <option value="0.5">0.5</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="6">6</option>
+              <option value="12">12</option>
+              <option value="custom">Custom</option>
+            </select>
+          </div>
         </div>
         <div className="grid two">
           <div>
             <label>Custom snap (in)</label>
-            <input className="number" type="number" value={customSnap} step={0.1} min={0} onChange={e => setCustomSnap(parseFloat(e.target.value))} />
+            <input
+              className="number"
+              type="number"
+              value={customSnap}
+              step={0.1}
+              min={0}
+              disabled={snapOption !== 'custom'}
+              onChange={e => setCustomSnap(e.target.value)}
+              onBlur={commitCustomSnap}
+              onKeyDown={(e) => { if (e.key === 'Enter') { commitCustomSnap(); e.currentTarget.blur(); } }}
+              style={snapOption === 'custom' ? undefined : { opacity: 0.55 }}
+              title={snapOption === 'custom' ? 'Enter snap step used when placing points' : 'Select Custom in the dropdown to edit'}
+            />
           </div>
           <div>
             <label>Preview speed (in/s)</label>
@@ -748,7 +1035,7 @@ setPositionDrive(path, ${v});`;
       {/* Right export / tools panel */}
       <div className="card">
         <div className="row inline" style={{ marginBottom: 8 }}>
-          <button className="btn" onClick={copyCode}>Copy</button>
+          <button className={`btn ${copied ? 'primary' : ''}`} onClick={copyCode}>{copied ? 'Copied!' : 'Copy'}</button>
           <div />
         </div>
         <div className="codebox">{code}</div>
@@ -769,7 +1056,7 @@ setPositionDrive(path, ${v});`;
         </div>
 
         <div className="grid two" style={{marginTop: 8}}>
-          <button className="btn warn" onClick={undoLast}>Undo point</button>
+          <button className="btn warn" onClick={undoLast}>Undo</button>
           <button className="btn danger" onClick={clearAll}>Clear path</button>
         </div>
       </div>
