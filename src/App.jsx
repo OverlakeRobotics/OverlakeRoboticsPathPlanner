@@ -307,7 +307,9 @@ export default function App() {
       // point dot
       ctx.fillStyle = i === points.length - 1 ? "#ffffff" : "#cbd5e1"; ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI * 2); ctx.fill();
       // heading arrow (marker-only)
-      const v = headingVectorCanvas(h, 18); drawArrow(ctx, cx, cy, cx + v.dx, cy + v.dy, "#6be675");
+      if (p.showHeading !== false) {
+        const v = headingVectorCanvas(h, 18); drawArrow(ctx, cx, cy, cx + v.dx, cy + v.dy, "#6be675");
+      }
     });
     // Only draw the ROBOT outline on the LAST point
     if (points.length > 0) {
@@ -334,6 +336,21 @@ export default function App() {
       ctx.restore();
       return;
     }
+
+    const fallbackHeading = () => {
+      if (points.length > 0) return num(points[points.length - 1]?.h ?? 0);
+      return num(startPose.h);
+    };
+
+    const headingFromVectorForMode = (vec) => {
+      const mag = Math.hypot(vec.dx ?? 0, vec.dy ?? 0);
+      if (mode === "straight") return num(endHeadingInput);
+      if (mag <= 1e-6) return fallbackHeading();
+      if (mode === "tangent") return headingFromDelta(vec.dx, vec.dy);
+      if (mode === "orth-left") return perpendicularHeading(vec.dx, vec.dy, true);
+      if (mode === "orth-right") return perpendicularHeading(vec.dx, vec.dy, false);
+      return fallbackHeading();
+    };
 
     if (shapeType === "bezier" && bezierTemp) {
       ctx.save();
@@ -372,9 +389,12 @@ export default function App() {
           ctx.fill();
           ctx.globalAlpha = 1;
 
-          const vBezier = headingVectorCanvas(preview.h, 18);
+          const lastSample = samples[samples.length - 1];
+          const tangRaw = lastSample?.tangent ?? { dx: end.x - prevAnchor.x, dy: end.y - prevAnchor.y };
+          const heading = headingFromVectorForMode(tangRaw);
+          const vBezier = headingVectorCanvas(heading, 18);
           drawArrow(ctx, b.cx, b.cy, b.cx + vBezier.dx, b.cy + vBezier.dy, "#94e2b8");
-          drawRectFootprint(ctx, preview.x, preview.y, preview.h, robotL, robotW, { fill: "#94e2b8", stroke: "#94e2b8", alpha: 0.10 });
+          drawRectFootprint(ctx, preview.x, preview.y, heading, robotL, robotW, { fill: "#94e2b8", stroke: "#94e2b8", alpha: 0.10 });
         }
       }
 
@@ -420,9 +440,12 @@ export default function App() {
           ctx.fill();
           ctx.globalAlpha = 1;
 
-          const vArc = headingVectorCanvas(preview.h, 18);
+          const lastSample = samples[samples.length - 1];
+          const tangRaw = lastSample?.tangent ?? { dx: end.x - prevAnchor.x, dy: end.y - prevAnchor.y };
+          const heading = headingFromVectorForMode(tangRaw);
+          const vArc = headingVectorCanvas(heading, 18);
           drawArrow(ctx, b.cx, b.cy, b.cx + vArc.dx, b.cy + vArc.dy, "#94e2b8");
-          drawRectFootprint(ctx, preview.x, preview.y, preview.h, robotL, robotW, { fill: "#94e2b8", stroke: "#94e2b8", alpha: 0.10 });
+          drawRectFootprint(ctx, preview.x, preview.y, heading, robotL, robotW, { fill: "#94e2b8", stroke: "#94e2b8", alpha: 0.10 });
         }
       }
 
@@ -575,7 +598,7 @@ export default function App() {
 
   // Place a single point (click or drag-add)
   function placePointAt(x, y) {
-    const p = { x, y, h: computePreviewHeading(x, y) };
+    const p = { x, y, h: computePreviewHeading(x, y), showHeading: true };
     appendPointsBatch([p], { type: 'point' });
     lastDragRef.current = { x, y };
   }
@@ -661,7 +684,8 @@ export default function App() {
     const straightHeading = num(endHeadingInput);
     let prevPoint = points.length > 0 ? points[points.length - 1] : { x: sx, y: sy };
 
-    for (const s of samples) {
+    for (let idx = 0; idx < samples.length; idx++) {
+      const s = samples[idx];
       let h;
       if (mode === "straight") {
         h = straightHeading;
@@ -678,7 +702,8 @@ export default function App() {
           h = 0;
         }
       }
-      appended.push({ x: s.x, y: s.y, h });
+      const isLast = idx === samples.length - 1;
+      appended.push({ x: s.x, y: s.y, h, showHeading: isLast });
       prevPoint = { x: s.x, y: s.y };
     }
 
@@ -709,6 +734,45 @@ export default function App() {
     const x1 = A.x, y1 = A.y, x2 = M.x, y2 = M.y, x3 = B.x, y3 = B.y;
     const d = 2 * (x1*(y2 - y3) + x2*(y3 - y1) + x3*(y1 - y2));
     if (Math.abs(d) < 1e-6) {
+      const vecAB = { dx: B.x - A.x, dy: B.y - A.y };
+      const vecAM = { dx: M.x - A.x, dy: M.y - A.y };
+      const lenAB = Math.hypot(vecAB.dx, vecAB.dy);
+      const lenAM = Math.hypot(vecAM.dx, vecAM.dy);
+      const samePoint = lenAB <= 1e-6;
+      const axisAligned = Math.abs(M.x - A.x) <= 1e-6 || Math.abs(M.y - A.y) <= 1e-6;
+
+      if (samePoint && axisAligned && lenAM > 1e-6) {
+        const radius = lenAM / 2;
+        const center = { x: (A.x + M.x) / 2, y: (A.y + M.y) / 2 };
+        let orientation = 1;
+        if (Math.abs(M.x - A.x) <= 1e-6) {
+          orientation = M.y > A.y ? 1 : -1;
+        } else if (Math.abs(M.y - A.y) <= 1e-6) {
+          orientation = M.x > A.x ? 1 : -1;
+        }
+        if (orientation === 0) orientation = 1;
+
+        const circumference = 2 * Math.PI * radius;
+        const spacing = 1.0;
+        const n = clamp(Math.ceil(circumference / spacing), 32, 400);
+        const startAngle = Math.atan2(A.y - center.y, A.x - center.x);
+        const deltaAngle = orientation * 2 * Math.PI;
+        const out = [];
+        for (let i = 1; i <= n; i++) {
+          const t = i / n;
+          if (t >= 1 - 1e-6) break;
+          const th = startAngle + deltaAngle * t;
+          const x = center.x + radius * Math.cos(th);
+          const y = center.y + radius * Math.sin(th);
+          const tangent = {
+            dx: -Math.sin(th) * radius * orientation,
+            dy: Math.cos(th) * radius * orientation,
+          };
+          out.push({ x, y, tangent });
+        }
+        return out;
+      }
+
       // Degenerate: fall back to straight line interpolation
       const len = Math.hypot(B.x - A.x, B.y - A.y);
       const n = clamp(Math.ceil(len / 1.0), 8, 200);
