@@ -929,7 +929,7 @@ export default function App() {
 
   async function uploadPoints(points) {
     const ROBOT_IP = "192.168.43.1"; // Control Hub AP default
-    await fetch(`http://${ROBOT_IP}:8081/points`, {
+    await fetch(`http://${ROBOT_IP}:8099/points`, {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify(points)
