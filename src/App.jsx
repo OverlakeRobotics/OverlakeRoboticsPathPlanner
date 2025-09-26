@@ -271,6 +271,27 @@ export default function App(){
   const [gridStep, setGridStep] = useState(DEFAULT_GRID_STEP);
   const [gridStepEntry, setGridStepEntry] = useState(String(DEFAULT_GRID_STEP));
 
+  // state
+  const [livePose, setLivePose] = useState(null);
+
+  // poll the hub for /pose
+  useEffect(() => {
+    let stop = false;
+    const tick = async () => {
+      try {
+        const res = await fetch("http://192.168.43.1:8099/pose", { cache: "no-store" });
+        if (res.ok) {
+          const j = await res.json();
+          if (!stop && j && j.ok) setLivePose({ x:j.x, y:j.y, h:j.h, t:j.t });
+        }
+      } catch {}
+      if (!stop) setTimeout(tick, 75); // ~13 Hz (tune: 50–100ms)
+    };
+    tick();
+    return () => { stop = true; };
+  }, []);
+
+
   const waypoints = useMemo(()=>{
     const sx=num(startPose.x), sy=num(startPose.y);
     return [{x:sx,y:sy}, ...points.map(p=>({x:p.x,y:p.y}))];
@@ -341,6 +362,13 @@ export default function App(){
     drawPointMarkersAndFootprints(octx);
     drawPreview(octx);
     drawPlaybackRobot(octx);
+    if (livePose) {
+      drawRectFootprint(octx, livePose.x, livePose.y, livePose.h, robotL, robotW, {
+        fill: "#ff6ad5",
+        stroke: "#ff6ad5",
+        alpha: 0.18
+      });
+    }
   },[bgImg, canvasSize, dpr, ppi, center, points, startPose, mode, robotL, robotW, preview, playState, playDist, totalLen, showGrid, gridStep, shapeType, arcTemp, bezierTemp, placeStart]);
 
   function drawGrid(ctx, step){
