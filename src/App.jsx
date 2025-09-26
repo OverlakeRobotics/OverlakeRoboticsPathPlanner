@@ -188,6 +188,7 @@ footer{
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const toFixed = (n, p=2) => Number(n).toFixed(p);
 const FIELD_EDGE = 72;
+const POSE_POLL_INTERVAL_MS = 10; // faster hub polling for smoother live pose (~100 Hz)
 const DEFAULT_GRID_STEP = 24;
 const num = (v) => (typeof v === "number" ? v : (isNaN(parseFloat(v)) ? 0 : parseFloat(v)));
 
@@ -273,6 +274,7 @@ export default function App(){
 
   // state
   const [livePose, setLivePose] = useState(null);
+  const [robotState, setRobotState] = useState(null);
 
   // poll the hub for /pose
   useEffect(() => {
@@ -282,14 +284,34 @@ export default function App(){
         const res = await fetch("http://192.168.43.1:8099/pose", { cache: "no-store" });
         if (res.ok) {
           const j = await res.json();
-          if (!stop && j && j.ok) setLivePose({ x:j.x, y:j.y, h:j.h, t:j.t });
+          if (!stop && j && j.ok) {
+            setLivePose({ x:j.x, y:j.y, h:j.h, t:j.t });
+            const maybeState = typeof j.state === "string" ? j.state : (typeof j.mode === "string" ? j.mode : null);
+            if (maybeState !== null) setRobotState(maybeState);
+          }
         }
       } catch {}
-      if (!stop) setTimeout(tick, 75); // ~13 Hz (tune: 50–100ms)
+      if (!stop) setTimeout(tick, POSE_POLL_INTERVAL_MS);
     };
     tick();
     return () => { stop = true; };
   }, []);
+
+  useEffect(() => {
+    if (!livePose) return;
+    const state = typeof robotState === "string" ? robotState.trim().toLowerCase() : "";
+    if (!state.startsWith("init")) return;
+    if (placeStart) return;
+    const lx = num(livePose.x);
+    const ly = num(livePose.y);
+    const lh = normDeg(num(livePose.h ?? startPose.h ?? 0));
+    const sx = num(startPose.x);
+    const sy = num(startPose.y);
+    const sh = normDeg(num(startPose.h ?? 0));
+    const same = Math.abs(lx - sx) < 1e-3 && Math.abs(ly - sy) < 1e-3 && Math.abs(normDeg(lh - sh)) < 1e-2;
+    if (same) return;
+    setStartPose(prev => ({ ...prev, x: lx, y: ly, h: lh }));
+  }, [robotState, livePose, placeStart, startPose]);
 
 
   const waypoints = useMemo(()=>{
@@ -363,13 +385,17 @@ export default function App(){
     drawPreview(octx);
     drawPlaybackRobot(octx);
     if (livePose) {
-      drawRectFootprint(octx, livePose.x, livePose.y, livePose.h, robotL, robotW, {
+      const heading = num(livePose.h ?? 0);
+      drawRectFootprint(octx, livePose.x, livePose.y, heading, robotL, robotW, {
         fill: "#ff6ad5",
         stroke: "#ff6ad5",
         alpha: 0.18
       });
+      const pos = worldToCanvas(livePose.x, livePose.y, center.x, center.y, ppi);
+      const v = headingVectorCanvas(heading, 24);
+      drawArrow(octx, pos.cx, pos.cy, pos.cx + v.dx, pos.cy + v.dy, "#ffbaf0");
     }
-  },[bgImg, canvasSize, dpr, ppi, center, points, startPose, mode, robotL, robotW, preview, playState, playDist, totalLen, showGrid, gridStep, shapeType, arcTemp, bezierTemp, placeStart]);
+  },[bgImg, canvasSize, dpr, ppi, center, points, startPose, mode, robotL, robotW, preview, playState, playDist, totalLen, showGrid, gridStep, shapeType, arcTemp, bezierTemp, placeStart, livePose]);
 
   function drawGrid(ctx, step){
     const s=Math.max(0.1, step);
@@ -408,6 +434,7 @@ export default function App(){
   function drawStartMarker(ctx){
     if(placeStart) return;
     const sx=num(startPose.x), sy=num(startPose.y), sh=num(startPose.h);
+    drawRectFootprint(ctx, sx, sy, sh, robotL, robotW, { fill: "#ffd166", stroke: "#ffc14b", alpha: 0.12 });
     const {cx,cy}=worldToCanvas(sx,sy,center.x,center.y,ppi);
     ctx.save(); ctx.fillStyle="#ffd166"; ctx.strokeStyle="#ffc14b"; ctx.lineWidth=2;
     ctx.beginPath(); ctx.arc(cx,cy,7,0,Math.PI*2); ctx.fill();
@@ -448,9 +475,22 @@ export default function App(){
     const prev = points.length>0 ? points[points.length-1] : {x:sx,y:sy,h:sh};
 
     if(placeStart && preview){
+      const heading = num(preview.h ?? startPose.h);
+      drawRectFootprint(ctx, preview.x, preview.y, heading, robotL, robotW, {
+        fill: "#ffd166",
+        stroke: "#ffc14b",
+        alpha: 0.16
+      });
       const pos=worldToCanvas(preview.x,preview.y,center.x,center.y,ppi);
-      ctx.save(); ctx.fillStyle="#ffd166"; ctx.strokeStyle="#ffc14b"; ctx.lineWidth=2;
-      ctx.beginPath(); ctx.arc(pos.cx,pos.cy,7,0,Math.PI*2); ctx.fill(); ctx.stroke(); ctx.restore();
+      const v=headingVectorCanvas(heading, 22);
+      drawArrow(ctx,pos.cx,pos.cy,pos.cx+v.dx,pos.cy+v.dy,"#ffd166");
+      ctx.save();
+      ctx.strokeStyle="#ffc14b";
+      ctx.lineWidth=2;
+      ctx.beginPath();
+      ctx.arc(pos.cx,pos.cy,6,0,Math.PI*2);
+      ctx.stroke();
+      ctx.restore();
       return;
     }
 
@@ -586,6 +626,19 @@ export default function App(){
       if(!prev) { clearAll(); }
       return next;
     });
+  }
+
+  function useLivePoseAsStart(){
+    if(!livePose) return;
+    clearAll();
+    const next = {
+      x: num(livePose.x),
+      y: num(livePose.y),
+      h: normDeg(num(livePose.h ?? startPose.h ?? 0))
+    };
+    setStartPose(next);
+    setPlaceStart(false);
+    setPreview(null);
   }
 
   function appendPointsBatch(newPoints, meta={}){
@@ -915,9 +968,14 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance)||0,2)};`;
               <div><label>Heading (°)</label><input className="number" type="text" value={String(startPose.h)}
                 onChange={e=>{ const v=e.target.value; if(v===""||v==="-" ) setStartPose({...startPose,h:v}); else { const n=parseFloat(v); if(!isNaN(n)) setStartPose({...startPose,h:normDeg(n)}); } }}/></div>
             </div>
-            <button className={`btn ${placeStart ? 'primary' : 'ok'}`} onClick={togglePlaceStart}>
-              {placeStart ? 'Select on field…' : 'Click to place start'}
-            </button>
+            <div className="inline">
+              <button className={`btn ${placeStart ? 'primary' : 'ok'}`} onClick={togglePlaceStart}>
+                {placeStart ? 'Select on field…' : 'Click to place start'}
+              </button>
+              <button className="btn ghost" onClick={useLivePoseAsStart} disabled={!livePose}>
+                Use live robot pose
+              </button>
+            </div>
           </section>
 
           {/* Grid & Robot */}
