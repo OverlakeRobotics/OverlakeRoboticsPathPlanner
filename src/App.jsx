@@ -590,14 +590,14 @@ export default function App() {
                 stroke: "#ffc14b",
                 alpha: 0.16
             });
-            const pos = worldToCanvas(preview.x, preview.y, center.x, center.y, ppi);
-            const v = headingVectorCanvas(heading, 22);
-            drawArrow(ctx, pos.cx, pos.cy, pos.cx + v.dx, pos.cy + v.dy, "#ffd166");
+            const pos=worldToCanvas(preview.x,preview.y,center.x,center.y,ppi);
+            const v=headingVectorCanvas(heading, 22);
+            drawArrow(ctx,pos.cx,pos.cy,pos.cx+v.dx,pos.cy+v.dy,"#ffd166");
             ctx.save();
-            ctx.strokeStyle = "#ffc14b";
-            ctx.lineWidth = 2;
+            ctx.strokeStyle="#ffc14b";
+            ctx.lineWidth=2;
             ctx.beginPath();
-            ctx.arc(pos.cx, pos.cy, 6, 0, Math.PI * 2);
+            ctx.arc(pos.cx,pos.cy,6,0,Math.PI*2);
             ctx.stroke();
             ctx.restore();
             return;
@@ -617,83 +617,49 @@ export default function App() {
         if (shapeType === "bezier" && bezierTemp) {
             ctx.save();
             const control = bezierTemp.control;
-            const ctrlC = worldToCanvas(control.x, control.y, center.x, center.y, ppi);
-            ctx.fillStyle = "#bae6fd";
-            ctx.globalAlpha = .9;
-            ctx.beginPath();
-            ctx.arc(ctrlC.cx, ctrlC.cy, 4, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.globalAlpha = 1;
-            if (preview) {
-                const samples = sampleQuadraticBezier(prev, control, {x: preview.x, y: preview.y});
-                if (samples?.length) {
-                    ctx.setLineDash([8, 6]);
-                    ctx.strokeStyle = "#94a3b8";
-                    ctx.lineWidth = 2;
-                    const a = worldToCanvas(prev.x, prev.y, center.x, center.y, ppi);
-                    ctx.beginPath();
-                    ctx.moveTo(a.cx, a.cy);
-                    for (const s of samples) {
-                        const c = worldToCanvas(s.x, s.y, center.x, center.y, ppi);
-                        ctx.lineTo(c.cx, c.cy);
-                    }
-                    ctx.stroke();
-                    ctx.setLineDash([]);
-                    const last = samples[samples.length - 1];
-                    const endC = worldToCanvas(preview.x, preview.y, center.x, center.y, ppi);
-                    const v = hFromMode(last?.tangent ?? {dx: preview.x - prev.x, dy: preview.y - prev.y});
-                    const arrow = headingVectorCanvas(v, 18);
-                    drawArrow(ctx, endC.cx, endC.cy, endC.cx + arrow.dx, endC.cy + arrow.dy, "#94e2b8");
-                    drawRectFootprint(ctx, preview.x, preview.y, v, robotL, robotW, {
-                        fill: "#94e2b8",
-                        stroke: "#94e2b8",
-                        alpha: .10
-                    });
+            const ctrlC=worldToCanvas(control.x,control.y,center.x,center.y,ppi);
+            ctx.fillStyle="#bae6fd"; ctx.globalAlpha=.9; ctx.beginPath(); ctx.arc(ctrlC.cx,ctrlC.cy,4,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1;
+            if(preview){
+                const samples=sampleQuadraticBezier(prev, control, {x:preview.x,y:preview.y});
+                if(samples?.length){
+                    ctx.setLineDash([8,6]); ctx.strokeStyle="#94a3b8"; ctx.lineWidth=2;
+                    const a=worldToCanvas(prev.x,prev.y,center.x,center.y,ppi);
+                    ctx.beginPath(); ctx.moveTo(a.cx,a.cy);
+                    for(const s of samples){ const c=worldToCanvas(s.x,s.y,center.x,center.y,ppi); ctx.lineTo(c.cx,c.cy); }
+                    ctx.stroke(); ctx.setLineDash([]);
+                    const last=samples[samples.length-1];
+                    const endC=worldToCanvas(preview.x,preview.y,center.x,center.y,ppi);
+                    const v=hFromMode(last?.tangent??{dx:preview.x-prev.x,dy:preview.y-prev.y});
+                    const arrow=headingVectorCanvas(v,18);
+                    drawArrow(ctx,endC.cx,endC.cy,endC.cx+arrow.dx,endC.cy+arrow.dy,"#94e2b8");
+                    drawRectFootprint(ctx, preview.x,preview.y, v, robotL,robotW, {fill:"#94e2b8",stroke:"#94e2b8",alpha:.10});
                 }
             }
-            ctx.restore();
-            return;
+            ctx.restore(); return;
         }
 
         if (shapeType === "arc" && arcTemp) {
             ctx.save();
-            const mid = arcTemp.mid;
-            const midC = worldToCanvas(mid.x, mid.y, center.x, center.y, ppi);
-            ctx.fillStyle = "#bae6fd";
-            ctx.globalAlpha = .9;
-            ctx.beginPath();
-            ctx.arc(midC.cx, midC.cy, 4, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.globalAlpha = 1;
-            if (preview) {
-                const samples = sampleCircularArcThrough(prev, mid, {x: preview.x, y: preview.y});
-                if (samples?.length) {
-                    ctx.setLineDash([8, 6]);
-                    ctx.strokeStyle = "#94a3b8";
-                    ctx.lineWidth = 2;
-                    const a = worldToCanvas(prev.x, prev.y, center.x, center.y, ppi);
-                    ctx.beginPath();
-                    ctx.moveTo(a.cx, a.cy);
-                    for (const s of samples) {
-                        const c = worldToCanvas(s.x, s.y, center.x, center.y, ppi);
-                        ctx.lineTo(c.cx, c.cy);
-                    }
-                    ctx.stroke();
-                    ctx.setLineDash([]);
-                    const last = samples[samples.length - 1];
-                    const endC = worldToCanvas(preview.x, preview.y, center.x, center.y, ppi);
-                    const v = hFromMode(last?.tangent ?? {dx: preview.x - prev.x, dy: preview.y - prev.y});
-                    const arrow = headingVectorCanvas(v, 18);
-                    drawArrow(ctx, endC.cx, endC.cy, endC.cx + arrow.dx, endC.cy + arrow.dy, "#94e2b8");
-                    drawRectFootprint(ctx, preview.x, preview.y, v, robotL, robotW, {
-                        fill: "#94e2b8",
-                        stroke: "#94e2b8",
-                        alpha: .10
-                    });
+            const mid=arcTemp.mid;
+            const midC=worldToCanvas(mid.x,mid.y,center.x,center.y,ppi);
+            ctx.fillStyle="#bae6fd"; ctx.globalAlpha=.9; ctx.beginPath(); ctx.arc(midC.cx,midC.cy,4,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1;
+            if(preview){
+                const samples=sampleCircularArcThrough(prev, mid, {x:preview.x,y:preview.y});
+                if(samples?.length){
+                    ctx.setLineDash([8,6]); ctx.strokeStyle="#94a3b8"; ctx.lineWidth=2;
+                    const a=worldToCanvas(prev.x,prev.y,center.x,center.y,ppi);
+                    ctx.beginPath(); ctx.moveTo(a.cx,a.cy);
+                    for(const s of samples){ const c=worldToCanvas(s.x,s.y,center.x,center.y,ppi); ctx.lineTo(c.cx,c.cy); }
+                    ctx.stroke(); ctx.setLineDash([]);
+                    const last=samples[samples.length-1];
+                    const endC=worldToCanvas(preview.x,preview.y,center.x,center.y,ppi);
+                    const v=hFromMode(last?.tangent??{dx:preview.x-prev.x,dy:preview.y-prev.y});
+                    const arrow=headingVectorCanvas(v,18);
+                    drawArrow(ctx,endC.cx,endC.cy,endC.cx+arrow.dx,endC.cy+arrow.dy,"#94e2b8");
+                    drawRectFootprint(ctx, preview.x,preview.y, v, robotL,robotW, {fill:"#94e2b8",stroke:"#94e2b8",alpha:.10});
                 }
             }
-            ctx.restore();
-            return;
+            ctx.restore(); return;
         }
 
         if (!preview) return;
@@ -726,14 +692,14 @@ export default function App() {
         const {pos, i, t} = g;
         const h0 = headingAtWaypoint(i), h1 = headingAtWaypoint(i + 1);
         const h = normDeg(h0 + shortestDeltaDeg(h0, h1) * t);
-        drawRectFootprint(ctx, pos.x, pos.y, h, robotL, robotW, {fill: "#ffe08a", stroke: "#ffd166", alpha: .16});
+        drawRectFootprint(ctx, pos.x, pos.y, h, robotL, robotW, {fill: "#6be675", stroke: "#6be675", alpha: .16});
         const c = worldToCanvas(pos.x, pos.y, center.x, center.y, ppi);
         const v = headingVectorCanvas(h, 22);
-        drawArrow(ctx, c.cx, c.cy, c.cx + v.dx, c.cy + v.dy, "#ffd166");
+        drawArrow(ctx, c.cx, c.cy, c.cx + v.dx, c.cy + v.dy, "#6be675");
         // Center dot for playback robot
         ctx.save();
         ctx.fillStyle = "#ffffff";
-        ctx.strokeStyle = "#ffd166";
+        ctx.strokeStyle = "#6be675";
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.arc(c.cx, c.cy, 3, 0, Math.PI * 2);
