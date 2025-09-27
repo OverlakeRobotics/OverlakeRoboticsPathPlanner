@@ -1,9 +1,6 @@
+import {useState} from "react";
+
 export default function BuildPanel({
-    onUploadBackground,
-    onResetBackground,
-    canvasSize,
-    setCanvasSize,
-    canvasOptions,
     shapeType,
     setShapeType,
     headingMode,
@@ -39,223 +36,280 @@ export default function BuildPanel({
     pointsLength,
 }) {
     const {length, width} = robotDimensions;
+    const [openSections, setOpenSections] = useState({
+        segment: true,
+        heading: true,
+        start: false,
+        motion: false,
+        overlay: false,
+        tags: false,
+    });
+
+    const toggleSection = (key) => {
+        setOpenSections((prev) => ({...prev, [key]: !prev[key]}));
+    };
+
+    const handleToggleKey = (event, key) => {
+        if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            toggleSection(key);
+        }
+    };
+
     return (
-        <aside className="panel">
-            <div className="panel-header">Build Path</div>
+        <aside className="panel panel-build">
+            <div className="panel-header">
+                <h2>Planner Controls</h2>
+            </div>
             <div className="panel-body scroll-area">
-                <section className="section">
-                    <h3>Field Background</h3>
-                    <input type="file" accept="image/*" onChange={onUploadBackground} />
-                    <div className="inline">
-                        <button className="btn ghost" onClick={onResetBackground}>Default field</button>
-                        <select value={canvasSize} onChange={(event) => setCanvasSize(Number(event.target.value))}>
-                            {canvasOptions.map((option) => (
-                                <option key={option} value={option}>{`Canvas ${option}`}</option>
-                            ))}
-                        </select>
-                    </div>
-                </section>
-
-                <section className="section">
-                    <h3>Segment Type</h3>
-                    <div className="grid-three">
-                        <button className={`btn ${shapeType === "line" ? "primary" : ""}`} onClick={() => setShapeType("line")}>
-                            Line
-                        </button>
-                        <button className={`btn ${shapeType === "bezier" ? "primary" : ""}`} onClick={() => setShapeType("bezier")}>
-                            Bezier
-                        </button>
-                        <button className={`btn ${shapeType === "arc" ? "primary" : ""}`} onClick={() => setShapeType("arc")}>
-                            Arc
-                        </button>
-                    </div>
-                </section>
-
-                <section className="section">
-                    <h3>Heading Mode</h3>
-                    <div className="grid-two">
-                        <button className={`btn ${headingMode === "straight" ? "primary" : ""}`} onClick={() => setHeadingMode("straight")}>
-                            Straight + End Heading
-                        </button>
-                        <button className={`btn ${headingMode === "tangent" ? "primary" : ""}`} onClick={() => setHeadingMode("tangent")}>
-                            Tangent (forward)
-                        </button>
-                    </div>
-                    <div className="grid-two">
-                        <button className={`btn ${headingMode === "orth-left" ? "primary" : ""}`} onClick={() => setHeadingMode("orth-left")}>
-                            Orthogonal (left)
-                        </button>
-                        <button className={`btn ${headingMode === "orth-right" ? "primary" : ""}`} onClick={() => setHeadingMode("orth-right")}>
-                            Orthogonal (right)
-                        </button>
-                    </div>
-                    {headingMode === "straight" && (
+                <section className="control-card">
+                    <div
+                        className="card-header collapsible"
+                        role="button"
+                        tabIndex={0}
+                        aria-expanded={openSections.segment}
+                        aria-controls="segment-card"
+                        onClick={() => toggleSection("segment")}
+                        onKeyDown={(event) => handleToggleKey(event, "segment")}
+                    >
                         <div>
-                            <label className="small">Desired end heading (°)</label>
-                            <input
-                                type="text"
-                                value={String(endHeading)}
-                                onChange={(event) => {
-                                    const value = event.target.value;
-                                    if (value === "" || value === "-") {
-                                        setEndHeading(value);
-                                        return;
-                                    }
-                                    const parsed = parseFloat(value);
-                                    if (!Number.isNaN(parsed)) setEndHeading(parsed);
-                                }}
-                            />
+                            <h3>Segment Shape</h3>
+                            <p>Select the geometry for new placements.</p>
+                        </div>
+                        <span className="collapse-caret">{openSections.segment ? "▾" : "▸"}</span>
+                    </div>
+                    {openSections.segment && (
+                        <div className="button-group" id="segment-card">
+                            <SegmentButton label="Line" active={shapeType === "line"} onClick={() => setShapeType("line")} />
+                            <SegmentButton label="Bézier Curve" active={shapeType === "bezier"} onClick={() => setShapeType("bezier")} />
+                            <SegmentButton label="Circular Arc" active={shapeType === "arc"} onClick={() => setShapeType("arc")} />
                         </div>
                     )}
                 </section>
 
-                <section className="section">
-                    <h3>Motion</h3>
-                    <div className="grid-two">
+                <section className="control-card">
+                    <div
+                        className="card-header collapsible"
+                        role="button"
+                        tabIndex={0}
+                        aria-expanded={openSections.heading}
+                        aria-controls="heading-card"
+                        onClick={() => toggleSection("heading")}
+                        onKeyDown={(event) => handleToggleKey(event, "heading")}
+                    >
                         <div>
-                            <label className="small">Velocity (in/s)</label>
-                            <input
-                                type="number"
-                                min={1}
-                                max={120}
-                                step={1}
-                                value={velocity}
-                                onChange={(event) => setVelocity(Number(event.target.value))}
-                            />
+                            <h3>Heading Strategy</h3>
+                            <p>Determine how headings are generated for each point.</p>
                         </div>
-                        <div>
-                            <label className="small">Preview speed (in/s)</label>
-                            <input
-                                type="number"
-                                min={1}
-                                max={120}
-                                step={1}
-                                value={playSpeed}
-                                onChange={(event) => setPlaySpeed(Number(event.target.value))}
-                            />
-                        </div>
+                        <span className="collapse-caret">{openSections.heading ? "▾" : "▸"}</span>
                     </div>
-                    <div className="grid-two">
-                        <div>
-                            <label className="small">Tolerance (in)</label>
-                            <input
-                                type="number"
-                                min={0}
-                                step={0.1}
-                                value={tolerance}
-                                onChange={(event) => setTolerance(event.target.value)}
-                            />
+                    {openSections.heading && (
+                        <div className="button-group compact" id="heading-card">
+                            <SegmentButton label="Straight" active={headingMode === "straight"} onClick={() => setHeadingMode("straight")} />
+                            <SegmentButton label="Tangent" active={headingMode === "tangent"} onClick={() => setHeadingMode("tangent")} />
+                            <SegmentButton label="Orthogonal L" active={headingMode === "orth-left"} onClick={() => setHeadingMode("orth-left")} />
+                            <SegmentButton label="Orthogonal R" active={headingMode === "orth-right"} onClick={() => setHeadingMode("orth-right")} />
+                            {headingMode === "straight" && (
+                                <div className="field">
+                                    <label>Desired end heading (°)</label>
+                                    <input
+                                        type="text"
+                                        value={String(endHeading)}
+                                        onChange={(event) => {
+                                            const value = event.target.value;
+                                            if (value === "" || value === "-") {
+                                                setEndHeading(value);
+                                                return;
+                                            }
+                                            const parsed = parseFloat(value);
+                                            if (!Number.isNaN(parsed)) setEndHeading(parsed);
+                                        }}
+                                    />
+                                </div>
+                            )}
                         </div>
-                        <div>
-                            <label className="small">Snap (in) – placement only</label>
-                            <input
-                                type="number"
-                                min={0}
-                                step={0.1}
-                                value={snapInches}
-                                onChange={(event) => setSnapInches(event.target.value)}
-                            />
-                        </div>
-                    </div>
+                    )}
                 </section>
 
-                <section className="section">
-                    <h3>Start Pose</h3>
-                    <div className="grid-three">
-                        <label>
-                            <span className="small">X (in)</span>
-                            <input type="text" value={String(startPose.x)} onChange={(event) => handlePoseChange(event.target.value, "x", setStartPose)} />
-                        </label>
-                        <label>
-                            <span className="small">Y (in)</span>
-                            <input type="text" value={String(startPose.y)} onChange={(event) => handlePoseChange(event.target.value, "y", setStartPose)} />
-                        </label>
-                        <label>
-                            <span className="small">Heading (°)</span>
-                            <input type="text" value={String(startPose.h)} onChange={(event) => handlePoseChange(event.target.value, "h", setStartPose)} />
-                        </label>
+                <section className="control-card">
+                    <div
+                        className="card-header collapsible"
+                        role="button"
+                        tabIndex={0}
+                        aria-expanded={openSections.start}
+                        aria-controls="start-card"
+                        onClick={() => toggleSection("start")}
+                        onKeyDown={(event) => handleToggleKey(event, "start")}
+                    >
+                        <div>
+                            <h3>Start Pose</h3>
+                            <p>Define where the robot begins on the field.</p>
+                        </div>
+                        <span className="collapse-caret">{openSections.start ? "▾" : "▸"}</span>
                     </div>
-                    <div className="inline">
-                        <button className={`btn ${placeStart ? "primary" : "ok"}`} onClick={togglePlaceStart}>
-                            {placeStart ? "Select on field…" : "Click to place start"}
+                    {openSections.start && (
+                        <div className="field-grid three" id="start-card">
+                            <Field label="X (in)">
+                                <input type="text" value={String(startPose.x)} onChange={(event) => handlePoseChange(event.target.value, "x", setStartPose)} />
+                            </Field>
+                            <Field label="Y (in)">
+                                <input type="text" value={String(startPose.y)} onChange={(event) => handlePoseChange(event.target.value, "y", setStartPose)} />
+                            </Field>
+                            <Field label="Heading (°)">
+                                <input type="text" value={String(startPose.h)} onChange={(event) => handlePoseChange(event.target.value, "h", setStartPose)} />
+                            </Field>
+                        </div>
+                    )}
+                    <div className="card-actions">
+                        <button className={`btn callout ${placeStart ? "callout-active" : ""}`} onClick={togglePlaceStart}>
+                            {placeStart ? "Click on field to set start" : "Place start on field"}
                         </button>
-                        <button className="btn ghost" onClick={useLivePose} disabled={!livePoseAvailable}>
+                        <button className="btn callout secondary" onClick={useLivePose} disabled={!livePoseAvailable}>
                             Use live robot pose
                         </button>
                     </div>
                 </section>
 
-                <section className="section">
-                    <h3>Grid &amp; Robot</h3>
-                    <div className="grid-two">
+                <section className="control-card">
+                    <div
+                        className="card-header collapsible"
+                        role="button"
+                        tabIndex={0}
+                        aria-expanded={openSections.motion}
+                        aria-controls="motion-card"
+                        onClick={() => toggleSection("motion")}
+                        onKeyDown={(event) => handleToggleKey(event, "motion")}
+                    >
                         <div>
-                            <label className="small">Grid overlay</label>
-                            <select value={showGrid ? "on" : "off"} onChange={(event) => setShowGrid(event.target.value === "on")}>
-                                <option value="off">Off</option>
-                                <option value="on">On</option>
-                            </select>
+                            <h3>Motion &amp; Placement</h3>
+                            <p>Match drivetrain performance and snapping preferences.</p>
                         </div>
-                        <div>
-                            <label className="small">Grid step (in)</label>
-                            <input
-                                type="number"
-                                min={0.25}
-                                step={0.25}
-                                value={gridStepEntry}
-                                onChange={(event) => setGridStepEntry(event.target.value)}
-                                onBlur={commitGridStep}
-                                onKeyDown={(event) => {
-                                    if (event.key === "Enter") {
-                                        commitGridStep();
-                                        event.currentTarget.blur();
-                                    }
-                                }}
-                                disabled={!showGrid}
-                                style={showGrid ? undefined : {opacity: 0.55}}
-                            />
-                        </div>
+                        <span className="collapse-caret">{openSections.motion ? "▾" : "▸"}</span>
                     </div>
-                    <div className="grid-two">
-                        <div>
-                            <label className="small">Robot length (in)</label>
-                            <input type="number" min={1} max={36} step={0.5} value={length} onChange={(event) => setRobotDimensions((prev) => ({...prev, length: Number(event.target.value)}))} />
+                    {openSections.motion && (
+                        <div className="field-grid" id="motion-card">
+                            <Field label="Velocity (in/s)">
+                                <input type="number" min={1} max={120} step={1} value={velocity} onChange={(event) => setVelocity(Number(event.target.value))} />
+                            </Field>
+                            <Field label="Preview speed (in/s)">
+                                <input type="number" min={1} max={120} step={1} value={playSpeed} onChange={(event) => setPlaySpeed(Number(event.target.value))} />
+                            </Field>
+                            <Field label="Tolerance (in)">
+                                <input type="number" min={0} step={0.1} value={tolerance} onChange={(event) => setTolerance(event.target.value)} />
+                            </Field>
+                            <Field label="Snap (in)">
+                                <input type="number" min={0} step={0.1} value={snapInches} onChange={(event) => setSnapInches(event.target.value)} />
+                            </Field>
                         </div>
-                        <div>
-                            <label className="small">Robot width (in)</label>
-                            <input type="number" min={1} max={36} step={0.5} value={width} onChange={(event) => setRobotDimensions((prev) => ({...prev, width: Number(event.target.value)}))} />
-                        </div>
-                    </div>
-                    <span className="small">Length aligns with +X, width with +Y.</span>
+                    )}
                 </section>
 
-                <section className="section">
-                    <h3>Tags</h3>
-                    <div className="grid-two">
-                        <input
-                            type="text"
-                            placeholder="Name (e.g., intakeOn)"
-                            value={tagName}
-                            onChange={(event) => setTagName(event.target.value)}
-                        />
-                        <input
-                            type="number"
-                            step={1}
-                            placeholder="Value"
-                            value={tagValue}
-                            onChange={(event) => setTagValue(event.target.value)}
-                        />
+                <section className="control-card">
+                    <div
+                        className="card-header collapsible"
+                        role="button"
+                        tabIndex={0}
+                        aria-expanded={openSections.overlay}
+                        aria-controls="overlay-card"
+                        onClick={() => toggleSection("overlay")}
+                        onKeyDown={(event) => handleToggleKey(event, "overlay")}
+                    >
+                        <div>
+                            <h3>Field Overlay</h3>
+                            <p>Toggle gridlines and update the robot footprint.</p>
+                        </div>
+                        <span className="collapse-caret">{openSections.overlay ? "▾" : "▸"}</span>
                     </div>
-                    <div className="inline">
-                        <button className="btn ok" onClick={addTag} disabled={pointsLength === 0 || !tagName.trim()}>
-                            Add Tag
-                        </button>
-                        <span className="small">Tags attach to the most recent point.</span>
+                    {openSections.overlay && (
+                        <>
+                            <div className="field-grid" id="overlay-card">
+                                <Field label="Grid overlay">
+                                    <select value={showGrid ? "on" : "off"} onChange={(event) => setShowGrid(event.target.value === "on")}>
+                                        <option value="off">Hidden</option>
+                                        <option value="on">Visible</option>
+                                    </select>
+                                </Field>
+                                <Field label="Grid step (in)">
+                                    <input
+                                        type="number"
+                                        min={0.25}
+                                        step={0.25}
+                                        value={gridStepEntry}
+                                        onChange={(event) => setGridStepEntry(event.target.value)}
+                                        onBlur={commitGridStep}
+                                        onKeyDown={(event) => {
+                                            if (event.key === "Enter") {
+                                                commitGridStep();
+                                                event.currentTarget.blur();
+                                            }
+                                        }}
+                                        disabled={!showGrid}
+                                        style={showGrid ? undefined : {opacity: 0.55}}
+                                    />
+                                </Field>
+                                <Field label="Robot length (in)">
+                                    <input type="number" min={1} max={36} step={0.5} value={length} onChange={(event) => setRobotDimensions((prev) => ({...prev, length: Number(event.target.value)}))} />
+                                </Field>
+                                <Field label="Robot width (in)">
+                                    <input type="number" min={1} max={36} step={0.5} value={width} onChange={(event) => setRobotDimensions((prev) => ({...prev, width: Number(event.target.value)}))} />
+                                </Field>
+                            </div>
+                            <p className="helper-text">Length aligns with +X, width with +Y.</p>
+                        </>
+                    )}
+                </section>
+
+                <section className="control-card">
+                    <div
+                        className="card-header collapsible"
+                        role="button"
+                        tabIndex={0}
+                        aria-expanded={openSections.tags}
+                        aria-controls="tags-card"
+                        onClick={() => toggleSection("tags")}
+                        onKeyDown={(event) => handleToggleKey(event, "tags")}
+                    >
+                        <div>
+                            <h3>Tags</h3>
+                            <p>Attach metadata to match automation routines.</p>
+                        </div>
+                        <span className="collapse-caret">{openSections.tags ? "▾" : "▸"}</span>
                     </div>
+                    {openSections.tags && (
+                        <>
+                            <div className="field-grid" id="tags-card">
+                                <Field label="Name">
+                                    <input type="text" placeholder="e.g., intakeOn" value={tagName} onChange={(event) => setTagName(event.target.value)} />
+                                </Field>
+                                <Field label="Value">
+                                    <input type="number" step={1} placeholder="0" value={tagValue} onChange={(event) => setTagValue(event.target.value)} />
+                                </Field>
+                            </div>
+                            <div className="card-actions">
+                                <button className="btn pill" onClick={addTag} disabled={pointsLength === 0 || !tagName.trim()}>
+                                    Add tag to latest point
+                                </button>
+                            </div>
+                        </>
+                    )}
                 </section>
             </div>
         </aside>
     );
 }
+
+const SegmentButton = ({label, active, onClick}) => (
+    <button className={`btn pill ${active ? "pill-active" : ""}`} onClick={onClick}>
+        {label}
+    </button>
+);
+
+const Field = ({label, children}) => (
+    <div className="field">
+        <label>{label}</label>
+        {children}
+    </div>
+);
 
 function handlePoseChange(value, key, setPose) {
     if (value === "" || value === "-") {

@@ -1,14 +1,13 @@
 export const FIELD_SIZE_IN = 144;
 export const FIELD_EDGE_IN = FIELD_SIZE_IN / 2;
 
-export const CANVAS_SIZES = [600, 720, 900];
 export const DEFAULT_CANVAS_SIZE = 720;
 
 export const GRID_DEFAULT_STEP = 24;
 export const GRID_MIN_STEP = 0.25;
 
-export const DEFAULT_SNAP_IN = 1;
-export const DEFAULT_TOLERANCE_IN = 0.5;
+export const DEFAULT_SNAP_IN = 3;
+export const DEFAULT_TOLERANCE_IN = 5;
 export const DEFAULT_VELOCITY_IN_PER_S = 30;
 export const DEFAULT_PLAYBACK_SPEED_IN_PER_S = 30;
 
@@ -16,6 +15,9 @@ export const DEFAULT_ROBOT_DIMENSIONS = {
     length: 18,
     width: 18,
 };
+
+export const DEFAULT_LEFT_PANEL_WIDTH = 420;
+export const DEFAULT_RIGHT_PANEL_WIDTH = 420;
 
 export const POSE_POLL_INTERVAL_MS = 10;
 export const HUB_IP = "192.168.43.1";

@@ -1,3 +1,9 @@
+const uploadLabel = (status) =>
+    status === "sending" ? "Uploading…" : status === "ok" ? "Uploaded" : status === "fail" ? "Failed Upload" : "Upload";
+
+const uploadClass = (status) =>
+    status === "ok" ? "btn ok" : status === "fail" ? "btn danger" : status === "sending" ? "btn warn" : "btn primary";
+
 export default function RunPanel({
     onUpload,
     uploadStatus,
@@ -16,62 +22,89 @@ export default function RunPanel({
     tags,
     onRemoveTag,
 }) {
-    const uploadLabel = uploadStatus === "sending" ? "Uploading…" : uploadStatus === "ok" ? "Uploaded" : uploadStatus === "fail" ? "Failed Upload" : "Upload";
-    const uploadClass = uploadStatus === "ok" ? "btn ok" : uploadStatus === "fail" ? "btn danger" : uploadStatus === "sending" ? "btn warn" : "btn primary";
-    const estTime = totalLength > 0 ? (totalLength / Math.max(velocity || 1, 1)).toFixed(1) : "0.0";
-    const progressPct = totalLength > 0 ? Math.round((playDist / totalLength) * 100) : 0;
+    const lengthDisplay = toFixed(totalLength, 1);
+    const timeDisplay = totalLength > 0 ? (totalLength / Math.max(velocity || 1, 1)).toFixed(1) : "0.0";
+    const progress = totalLength > 0 ? Math.round((playDist / totalLength) * 100) : 0;
 
     return (
-        <aside className="panel">
-            <div className="panel-header">Run &amp; Export</div>
+        <aside className="panel panel-run">
+            <div className="panel-header">
+                <h2>Run &amp; Export</h2>
+            </div>
             <div className="panel-body scroll-area">
-                <section className="section">
-                    <div className="inline">
-                        <button className={uploadClass} onClick={onUpload}>{uploadLabel}</button>
-                        <button className="btn ghost" onClick={onCopy}>{copied ? "Copied!" : "Copy"}</button>
+                <section className="control-card">
+                    <div className="card-header">
+                        <h3>Actions</h3>
+                        <p>Synchronize with the hub or copy generated code.</p>
                     </div>
-                    <div className="inline">
-                        <button className={`btn ${playState === "playing" ? "primary" : ""}`} onClick={onTogglePlay}>
-                            {playState === "playing" ? "⏸ Pause" : "▶ Play"}
+                    <div className="card-actions stack">
+                        <button className={uploadClass(uploadStatus)} onClick={onUpload}>
+                            {uploadLabel(uploadStatus)}
                         </button>
-                        <button className="btn danger" onClick={onStop}>
-                            ⏹ Stop
+                        <button className="btn ghost" onClick={onCopy}>
+                            {copied ? "Copied!" : "Copy code"}
                         </button>
                     </div>
                 </section>
 
-                <section className="section">
-                    <h3>Path Stats</h3>
-                    <div className="grid-three">
+                <section className="control-card">
+                    <div className="card-header">
+                        <h3>Playback</h3>
+                        <p>Preview the route before committing to the field.</p>
+                    </div>
+                    <div className="card-actions stack">
+                        <button className={`btn pill ${playState === "playing" ? "pill-active" : ""}`} onClick={onTogglePlay}>
+                            {playState === "playing" ? "Pause preview" : "Play preview"}
+                        </button>
+                        <button className="btn ghost" onClick={onStop}>
+                            Stop
+                        </button>
+                    </div>
+                    <div className="stat-grid">
                         <Stat label="Points" value={pointsCount} />
-                        <Stat label="Length (in)" value={toFixed(totalLength, 1)} />
-                        <Stat label="Est. Time (s)" value={estTime} />
+                        <Stat label="Length (in)" value={lengthDisplay} />
+                        <Stat label="Est. time (s)" value={timeDisplay} />
                     </div>
-                    <div className="small">Progress: {progressPct}% • {toFixed(playDist, 1)} / {toFixed(totalLength, 1)} in</div>
+                    <div className="progress-line">
+                        <span className="small">Progress</span>
+                        <span className="small">{progress}% • {toFixed(playDist, 1)} / {lengthDisplay} in</span>
+                    </div>
                 </section>
 
-                <section className="section">
-                    <h3>Copy / Export</h3>
-                    <textarea className="code-box" readOnly value={code} />
-                    <div className="inline">
+                <section className="control-card">
+                    <div className="card-header">
+                        <h3>Manage Path</h3>
+                        <p>Undo or clear before exporting.</p>
+                    </div>
+                    <div className="card-actions stack">
                         <button className="btn ghost" onClick={onUndo}>
-                            Undo
+                            Undo last
                         </button>
                         <button className="btn danger" onClick={onClear}>
-                            Clear Path
+                            Clear path
                         </button>
                     </div>
                 </section>
 
-                {tags.length > 0 && (
-                    <section className="section">
-                        <h3>Tags</h3>
-                        <div className="tag-list" style={{display: "grid", gap: "8px"}}>
+                <section className="control-card">
+                    <div className="card-header">
+                        <h3>Generated Code</h3>
+                        <p>Paste into your robot project to mirror this plan.</p>
+                    </div>
+                    <textarea className="code-box" readOnly value={code} />
+                </section>
+
+                {!!tags.length && (
+                    <section className="control-card">
+                        <div className="card-header">
+                            <h3>Tags</h3>
+                            <p>Attached to the most recent placement.</p>
+                        </div>
+                        <div className="tag-list">
                             {tags.map((tag, index) => (
-                                <div key={`${tag.name}-${index}`} className="inline" style={{justifyContent: "space-between"}}>
-                                    <span className="small">
-                                        {tag.name} • value {tag.value} • point {tag.index}
-                                    </span>
+                                <div key={`${tag.name}-${index}`} className="tag-pill">
+                                    <span>{tag.name}</span>
+                                    <span className="tag-meta">value {tag.value} • point {tag.index}</span>
                                     {onRemoveTag && (
                                         <button className="btn ghost" onClick={() => onRemoveTag(index)}>
                                             Remove
@@ -83,23 +116,27 @@ export default function RunPanel({
                     </section>
                 )}
 
-                <section className="section">
-                    <h3>Legend</h3>
-                    <legend className="chips">
+                <section className="control-card">
+                    <div className="card-header">
+                        <h3>Legend</h3>
+                    </div>
+                    <div className="legend chips">
                         <span><span className="dot" style={{background: "#ffd166"}} /> Start</span>
                         <span><span className="dot" style={{background: "#cbd5e1"}} /> Waypoint</span>
-                        <span><span className="dot" style={{background: "#7aa2ff"}} /> Robot footprint</span>
+                        <span><span className="dot" style={{background: "#7aa2ff"}} /> Footprint</span>
                         <span><span className="dot" style={{background: "#5cd2ff"}} /> Path line</span>
-                    </legend>
+                    </div>
                 </section>
 
-                <section className="section">
-                    <h3>Tips</h3>
+                <section className="control-card">
+                    <div className="card-header">
+                        <h3>Workflow Tips</h3>
+                    </div>
                     <ul className="tip-list">
-                        <li>Place start, pick a segment type, then click to add points.</li>
-                        <li>Use Snap for cleaner placement; Tolerance carries through upload/export.</li>
-                        <li>Tags attach to the latest point—add them right after placing it.</li>
-                        <li>Preview speed is independent of your motion velocity.</li>
+                        <li>Place the start, choose a segment style, then click through waypoints.</li>
+                        <li>Enable grid snapping for quick alignment and cleaner paths.</li>
+                        <li>Tags latch to the latest waypoint—add them immediately after placing.</li>
+                        <li>Preview speed lets you test timing without impacting upload velocity.</li>
                     </ul>
                 </section>
             </div>
@@ -108,9 +145,9 @@ export default function RunPanel({
 }
 
 const Stat = ({label, value}) => (
-    <div style={{background: "rgba(255,255,255,0.08)", borderRadius: 10, padding: "12px", display: "grid", gap: 4}}>
-        <span className="small" style={{textTransform: "uppercase", letterSpacing: 0.75}}>{label}</span>
-        <strong style={{fontSize: 18}}>{value}</strong>
+    <div className="stat-card">
+        <span className="small stat-label">{label}</span>
+        <strong>{value}</strong>
     </div>
 );
 

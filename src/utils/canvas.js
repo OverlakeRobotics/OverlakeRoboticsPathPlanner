@@ -202,13 +202,12 @@ const drawPreview = (ctx, {
     bezierTemp,
     arcTemp,
 }) => {
-    if (!preview) return;
     const sx = num(startPose.x);
     const sy = num(startPose.y);
     const sh = num(startPose.h);
     const anchor = points.length ? points[points.length - 1] : {x: sx, y: sy, h: sh};
 
-    if (placeStart) {
+    if (placeStart && preview) {
         const heading = num(preview.h ?? sh);
         drawFootprint(ctx, preview.x, preview.y, heading, robot.length, robot.width, {
             fill: START_COLOR,
@@ -220,6 +219,19 @@ const drawPreview = (ctx, {
     }
 
     if (shapeType === "bezier" && bezierTemp) {
+        const control = bezierTemp.control;
+        const ctrlCanvas = worldToCanvas(control.x, control.y, center.x, center.y, ppi);
+        ctx.save();
+        ctx.fillStyle = "#bae6fd";
+        ctx.globalAlpha = 0.9;
+        ctx.beginPath();
+        ctx.arc(ctrlCanvas.cx, ctrlCanvas.cy, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.restore();
+
+        if (!preview) return;
+
         drawCurvedPreview(ctx, {
             samples: sampleQuadraticBezier(anchor, bezierTemp.control, {x: preview.x, y: preview.y}),
             anchor,
@@ -234,6 +246,19 @@ const drawPreview = (ctx, {
     }
 
     if (shapeType === "arc" && arcTemp) {
+        const midpoint = arcTemp.mid;
+        const midCanvas = worldToCanvas(midpoint.x, midpoint.y, center.x, center.y, ppi);
+        ctx.save();
+        ctx.fillStyle = "#bae6fd";
+        ctx.globalAlpha = 0.9;
+        ctx.beginPath();
+        ctx.arc(midCanvas.cx, midCanvas.cy, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.restore();
+
+        if (!preview) return;
+
         drawCurvedPreview(ctx, {
             samples: sampleCircularArcThrough(anchor, arcTemp.mid, {x: preview.x, y: preview.y}),
             anchor,
@@ -246,6 +271,8 @@ const drawPreview = (ctx, {
         });
         return;
     }
+
+    if (!preview) return;
 
     drawStraightPreview(ctx, anchor, preview, center, ppi, robot);
 };

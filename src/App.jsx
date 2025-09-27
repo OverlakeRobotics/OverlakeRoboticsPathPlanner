@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useRef, useState} from "react";
+import {useCallback, useEffect, useMemo, useRef, useState} from "react";
 import decodeField from "./assets/decode_field.png";
 import "./App.css";
 
@@ -6,13 +6,14 @@ import CanvasStage from "./components/CanvasStage";
 import BuildPanel from "./components/panels/BuildPanel";
 import RunPanel from "./components/panels/RunPanel";
 import {
-    CANVAS_SIZES,
     DEFAULT_CANVAS_SIZE,
     DEFAULT_PLAYBACK_SPEED_IN_PER_S,
     DEFAULT_ROBOT_DIMENSIONS,
     DEFAULT_SNAP_IN,
     DEFAULT_TOLERANCE_IN,
     DEFAULT_VELOCITY_IN_PER_S,
+    DEFAULT_LEFT_PANEL_WIDTH,
+    DEFAULT_RIGHT_PANEL_WIDTH,
     GRID_DEFAULT_STEP,
     HUB_POINTS_URL,
     LIVE_POSE_SYNC_PREFIX,
@@ -21,12 +22,18 @@ import {
 } from "./constants/config";
 import {usePosePolling} from "./hooks/usePosePolling";
 import {usePlayback} from "./hooks/usePlayback";
-import {num, normDeg, toFixed} from "./utils/math";
+import {clamp, num, normDeg, toFixed} from "./utils/math";
 import {polylineLength} from "./utils/path";
 
 export default function App() {
-    const [canvasSize, setCanvasSize] = useState(DEFAULT_CANVAS_SIZE);
+    const canvasSize = DEFAULT_CANVAS_SIZE;
     const [backgroundImage, setBackgroundImage] = useState(null);
+    const [leftWidth, setLeftWidth] = useState(DEFAULT_LEFT_PANEL_WIDTH);
+    const [rightWidth, setRightWidth] = useState(DEFAULT_RIGHT_PANEL_WIDTH);
+    const layoutRef = useRef(null);
+    const leftWidthRef = useRef(leftWidth);
+    const rightWidthRef = useRef(rightWidth);
+    const [isNarrow, setIsNarrow] = useState(false);
 
     const [startPose, setStartPose] = useState({x: 0, y: 0, h: 0});
     const [placeStart, setPlaceStart] = useState(false);
@@ -60,6 +67,7 @@ export default function App() {
     const [copied, setCopied] = useState(false);
     const [uploadStatus, setUploadStatus] = useState("idle");
     const uploadTimerRef = useRef(null);
+    const undoRef = useRef(() => {});
 
     const {livePose, robotState} = usePosePolling();
 
@@ -67,6 +75,21 @@ export default function App() {
         const img = new Image();
         img.onload = () => setBackgroundImage(img);
         img.src = decodeField;
+    }, []);
+
+    useEffect(() => {
+        leftWidthRef.current = leftWidth;
+    }, [leftWidth]);
+
+    useEffect(() => {
+        rightWidthRef.current = rightWidth;
+    }, [rightWidth]);
+
+    useEffect(() => {
+        const update = () => setIsNarrow(window.innerWidth <= 980);
+        update();
+        window.addEventListener("resize", update);
+        return () => window.removeEventListener("resize", update);
     }, []);
 
     const waypoints = useMemo(() => [{x: num(startPose.x), y: num(startPose.y)}, ...points.map((p) => ({x: p.x, y: p.y}))], [startPose, points]);
@@ -104,23 +127,53 @@ export default function App() {
         if (uploadTimerRef.current) clearTimeout(uploadTimerRef.current);
     }, []);
 
-    const handleUploadBackground = (event) => {
-        const file = event.target.files?.[0];
-        if (!file) return;
-        const url = URL.createObjectURL(file);
-        const img = new Image();
-        img.onload = () => {
-            setBackgroundImage(img);
-            URL.revokeObjectURL(url);
-        };
-        img.src = url;
-    };
+    const beginResize = useCallback(
+        (side) => (event) => {
+            if (isNarrow) return;
+            const container = layoutRef.current;
+            if (!container) return;
+            event.preventDefault();
+            const pointerId = event.pointerId;
+            const MIN_LEFT = 240;
+            const MIN_RIGHT = 240;
+            const MIN_CENTER = canvasSize;
 
-    const resetBackground = () => {
-        const img = new Image();
-        img.onload = () => setBackgroundImage(img);
-        img.src = decodeField;
-    };
+            const handleMove = (moveEvent) => {
+                if (moveEvent.pointerId !== pointerId) return;
+                const rect = container.getBoundingClientRect();
+                const totalWidth = rect.width;
+
+                if (side === "left") {
+                    const maxLeft = Math.max(MIN_LEFT, totalWidth - rightWidthRef.current - MIN_CENTER);
+                    const proposed = moveEvent.clientX - rect.left;
+                    const next = clamp(proposed, MIN_LEFT, maxLeft);
+                    setLeftWidth(next);
+                } else {
+                    const maxRight = Math.max(MIN_RIGHT, totalWidth - leftWidthRef.current - MIN_CENTER);
+                    const proposed = rect.right - moveEvent.clientX;
+                    const next = clamp(proposed, MIN_RIGHT, maxRight);
+                    setRightWidth(next);
+                }
+            };
+
+            const handleUp = (upEvent) => {
+                if (upEvent.pointerId !== pointerId) return;
+                window.removeEventListener("pointermove", handleMove);
+                window.removeEventListener("pointerup", handleUp);
+            };
+
+            window.addEventListener("pointermove", handleMove);
+            window.addEventListener("pointerup", handleUp);
+        },
+        [canvasSize, isNarrow],
+    );
+
+    const shellStyle = isNarrow
+        ? undefined
+        : {
+              "--left-panel": `${leftWidth}px`,
+              "--right-panel": `${rightWidth}px`,
+          };
 
     const togglePlaceStart = () => {
         setPreview(null);
@@ -159,7 +212,7 @@ export default function App() {
         }
     };
 
-    const undoLast = () => {
+    const undoLast = useCallback(() => {
         if (bezierTemp) {
             setBezierTemp(null);
             setPreview(null);
@@ -175,7 +228,25 @@ export default function App() {
         const removeCount = Math.max(0, last?.count ?? 0);
         if (removeCount > 0) setPoints((prev) => prev.slice(0, Math.max(0, prev.length - removeCount)));
         setUndoStack((prev) => prev.slice(0, -1));
-    };
+    }, [bezierTemp, arcTemp, undoStack]);
+
+    useEffect(() => {
+        undoRef.current = undoLast;
+    }, [undoLast]);
+
+    useEffect(() => {
+        const handleKeyDown = (event) => {
+            const isMac = navigator.platform.toLowerCase().includes("mac");
+            const modifier = isMac ? event.metaKey : event.ctrlKey;
+            if (modifier && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "z") {
+                event.preventDefault();
+                undoRef.current();
+            }
+        };
+
+        window.addEventListener("keydown", handleKeyDown);
+        return () => window.removeEventListener("keydown", handleKeyDown);
+    }, []);
 
     const addTag = () => {
         if (points.length === 0) return;
@@ -254,13 +325,8 @@ export default function App() {
     };
 
     return (
-        <div className="app-shell">
+        <div className="app-shell" ref={layoutRef} style={shellStyle}>
             <BuildPanel
-                onUploadBackground={handleUploadBackground}
-                onResetBackground={resetBackground}
-                canvasSize={canvasSize}
-                setCanvasSize={setCanvasSize}
-                canvasOptions={CANVAS_SIZES}
                 shapeType={shapeType}
                 setShapeType={(type) => {
                     setShapeType(type);
@@ -300,34 +366,56 @@ export default function App() {
                 pointsLength={points.length}
             />
 
-            <CanvasStage
-                canvasSize={canvasSize}
-                backgroundImage={backgroundImage}
-                showGrid={showGrid}
-                gridStep={gridStep}
-                startPose={startPose}
-                setStartPose={setStartPose}
-                points={points}
-                setPoints={setPoints}
-                setUndoStack={setUndoStack}
-                placeStart={placeStart}
-                setPlaceStart={setPlaceStart}
-                shapeType={shapeType}
-                headingMode={headingMode}
-                endHeading={endHeadingValue}
-                snapInches={snapInches}
-                preview={preview}
-                setPreview={setPreview}
-                bezierTemp={bezierTemp}
-                setBezierTemp={setBezierTemp}
-                arcTemp={arcTemp}
-                setArcTemp={setArcTemp}
-                robot={robotDimensions}
-                livePose={livePose}
-                playState={playState}
-                playDist={playDist}
-                waypoints={waypoints}
-            />
+            {!isNarrow && (
+                <div
+                    className="resize-handle handle-left"
+                    onPointerDown={beginResize("left")}
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label="Resize planner controls panel"
+                />
+            )}
+
+            <div className="canvas-column">
+                <CanvasStage
+                    canvasSize={canvasSize}
+                    backgroundImage={backgroundImage}
+                    showGrid={showGrid}
+                    gridStep={gridStep}
+                    startPose={startPose}
+                    setStartPose={setStartPose}
+                    points={points}
+                    setPoints={setPoints}
+                    setUndoStack={setUndoStack}
+                    placeStart={placeStart}
+                    setPlaceStart={setPlaceStart}
+                    shapeType={shapeType}
+                    headingMode={headingMode}
+                    endHeading={endHeadingValue}
+                    snapInches={snapInches}
+                    preview={preview}
+                    setPreview={setPreview}
+                    bezierTemp={bezierTemp}
+                    setBezierTemp={setBezierTemp}
+                    arcTemp={arcTemp}
+                    setArcTemp={setArcTemp}
+                    robot={robotDimensions}
+                    livePose={livePose}
+                    playState={playState}
+                    playDist={playDist}
+                    waypoints={waypoints}
+                />
+            </div>
+
+            {!isNarrow && (
+                <div
+                    className="resize-handle handle-right"
+                    onPointerDown={beginResize("right")}
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label="Resize run panel"
+                />
+            )}
 
             <RunPanel
                 onUpload={doUpload}
@@ -347,8 +435,6 @@ export default function App() {
                 tags={tags}
                 onRemoveTag={removeTag}
             />
-
-            <footer>FTC path planning • +X forward, +Y left, +heading left • 1 tile = 24" • 12×12 tiles</footer>
         </div>
     );
 }
