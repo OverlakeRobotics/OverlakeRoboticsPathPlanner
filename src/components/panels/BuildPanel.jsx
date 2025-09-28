@@ -1,40 +1,43 @@
 import {useState} from "react";
 
 export default function BuildPanel({
-    shapeType,
-    setShapeType,
-    headingMode,
-    setHeadingMode,
-    endHeading,
-    setEndHeading,
-    velocity,
-    setVelocity,
-    playSpeed,
-    setPlaySpeed,
-    tolerance,
-    setTolerance,
-    snapInches,
-    setSnapInches,
-    startPose,
-    setStartPose,
-    placeStart,
-    togglePlaceStart,
-    useLivePose,
-    livePoseAvailable,
-    showGrid,
-    setShowGrid,
-    gridStepEntry,
-    setGridStepEntry,
-    commitGridStep,
-    robotDimensions,
-    setRobotDimensions,
-    tagName,
-    setTagName,
-    tagValue,
-    setTagValue,
-    addTag,
-    pointsLength,
-}) {
+                                       shapeType,
+                                       setShapeType,
+                                       headingMode,
+                                       setHeadingMode,
+                                       endHeading,
+                                       setEndHeading,
+                                       velocity,
+                                       setVelocity,
+                                       // NEW:
+                                       maxAccel,
+                                       setMaxAccel,
+                                       playSpeed,
+                                       setPlaySpeed,
+                                       tolerance,
+                                       setTolerance,
+                                       snapInches,
+                                       setSnapInches,
+                                       startPose,
+                                       setStartPose,
+                                       placeStart,
+                                       togglePlaceStart,
+                                       useLivePose,
+                                       livePoseAvailable,
+                                       showGrid,
+                                       setShowGrid,
+                                       gridStepEntry,
+                                       setGridStepEntry,
+                                       commitGridStep,
+                                       robotDimensions,
+                                       setRobotDimensions,
+                                       tagName,
+                                       setTagName,
+                                       tagValue,
+                                       setTagValue,
+                                       addTag,
+                                       pointsLength,
+                                   }) {
     const {length, width} = robotDimensions;
     const [openSections, setOpenSections] = useState({
         segment: true,
@@ -189,10 +192,13 @@ export default function BuildPanel({
                     {openSections.motion && (
                         <div className="field-grid" id="motion-card">
                             <Field label="Velocity (in/s)">
-                                <input type="number" min={1} max={120} step={1} value={velocity} onChange={(event) => setVelocity(Number(event.target.value))} />
+                                <input type="number" min={1} max={200} step={1} value={velocity} onChange={(event) => setVelocity(Number(event.target.value))} />
+                            </Field>
+                            <Field label="Max accel (in/s²)">
+                                <input type="number" min={1} max={400} step={1} value={maxAccel} onChange={(event) => setMaxAccel(Number(event.target.value))} />
                             </Field>
                             <Field label="Preview speed (in/s)">
-                                <input type="number" min={1} max={120} step={1} value={playSpeed} onChange={(event) => setPlaySpeed(Number(event.target.value))} />
+                                <input type="number" min={1} max={200} step={1} value={playSpeed} onChange={(event) => setPlaySpeed(Number(event.target.value))} />
                             </Field>
                             <Field label="Tolerance (in)">
                                 <input type="number" min={0} step={0.1} value={tolerance} onChange={(event) => setTolerance(event.target.value)} />

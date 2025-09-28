@@ -78,6 +78,8 @@ body {
   overflow: auto;
   display: grid;
   gap: 16px;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 input,
@@ -437,10 +439,11 @@ textarea.code-box::-webkit-scrollbar-thumb:hover {
   gap: 18px;
   min-height: 0;
 }
+
 .panel-run {
   grid-column: 5;
   min-height: 0;
-  align-self: start;
+  align-self: stretch;
 }
 
 .panel-run .panel-body.scroll-area {

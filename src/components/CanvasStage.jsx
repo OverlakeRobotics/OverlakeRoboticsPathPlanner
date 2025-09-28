@@ -12,33 +12,33 @@ import {
 const getDevicePixelRatio = () => (typeof window !== "undefined" ? Math.max(1, window.devicePixelRatio || 1) : 1);
 
 export default function CanvasStage({
-    canvasSize,
-    backgroundImage,
-    showGrid,
-    gridStep,
-    startPose,
-    setStartPose,
-    points,
-    setPoints,
-    setUndoStack,
-    placeStart,
-    setPlaceStart,
-    shapeType,
-    headingMode,
-    endHeading,
-    snapInches,
-    preview,
-    setPreview,
-    bezierTemp,
-    setBezierTemp,
-    arcTemp,
-    setArcTemp,
-    robot,
-    livePose,
-    playState,
-    playDist,
-    waypoints,
-}) {
+                                        canvasSize,
+                                        backgroundImage,
+                                        showGrid,
+                                        gridStep,
+                                        startPose,
+                                        setStartPose,
+                                        points,
+                                        setPoints,
+                                        setUndoStack,
+                                        placeStart,
+                                        setPlaceStart,
+                                        shapeType,
+                                        headingMode,
+                                        endHeading,
+                                        snapInches,
+                                        preview,
+                                        setPreview,
+                                        bezierTemp,
+                                        setBezierTemp,
+                                        arcTemp,
+                                        setArcTemp,
+                                        robot,
+                                        livePose,
+                                        playState,
+                                        playDist,
+                                        waypoints,
+                                    }) {
     const canvasRef = useRef(null);
     const overlayRef = useRef(null);
     const [dpr, setDpr] = useState(getDevicePixelRatio);
@@ -55,6 +55,9 @@ export default function CanvasStage({
 
     const ppi = useMemo(() => canvasSize / FIELD_SIZE_IN, [canvasSize]);
     const center = useMemo(() => ({x: canvasSize / 2, y: canvasSize / 2}), [canvasSize]);
+
+    const cx = (fieldY) => center.x - fieldY * ppi;
+    const cy = (fieldX) => center.y - fieldX * ppi;
 
     const resolveHeading = useMemo(
         () => buildHeadingResolver({headingMode, endHeading, startPose, points}),
@@ -119,9 +122,13 @@ export default function CanvasStage({
         const canvas = canvasRef.current;
         const overlay = overlayRef.current;
         if (!canvas || !overlay) return;
+
+        const baseCtx = canvas.getContext("2d");
+        const overlayCtx = overlay.getContext("2d");
+
         drawPlannerScene({
-            canvasCtx: canvas.getContext("2d"),
-            overlayCtx: overlay.getContext("2d"),
+            canvasCtx: baseCtx,
+            overlayCtx,
             canvasSize,
             backgroundImage,
             showGrid,
@@ -143,6 +150,24 @@ export default function CanvasStage({
             playDist,
             waypoints,
         });
+
+        if (preview) {
+            const x = Number(preview.x ?? 0);
+            const y = Number(preview.y ?? 0);
+
+            const px = cx(y);
+            const py = cy(x);
+
+            overlayCtx.save();
+            overlayCtx.beginPath();
+            overlayCtx.arc(px, py, 4, 0, Math.PI * 2);
+            overlayCtx.fillStyle = "#ffffff";
+            overlayCtx.fill();
+            overlayCtx.lineWidth = 2;
+            overlayCtx.strokeStyle = "#000000";
+            overlayCtx.stroke();
+            overlayCtx.restore();
+        }
     }, [
         canvasSize,
         backgroundImage,

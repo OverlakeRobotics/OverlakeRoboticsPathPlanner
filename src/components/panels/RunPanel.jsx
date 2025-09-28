@@ -5,26 +5,32 @@ const uploadClass = (status) =>
     status === "ok" ? "btn ok" : status === "fail" ? "btn danger" : status === "sending" ? "btn warn" : "btn primary";
 
 export default function RunPanel({
-    onUpload,
-    uploadStatus,
-    onCopy,
-    copied,
-    playState,
-    onTogglePlay,
-    onStop,
-    pointsCount,
-    totalLength,
-    velocity,
-    playDist,
-    code,
-    onUndo,
-    onClear,
-    tags,
-    onRemoveTag,
-}) {
+                                     onUpload,
+                                     uploadStatus,
+                                     onCopy,
+                                     copied,
+                                     playState,
+                                     onTogglePlay,
+                                     onStop,
+                                     pointsCount,
+                                     totalLength,
+                                     velocity,
+                                     playDist,
+                                     code,
+                                     onUndo,
+                                     onClear,
+                                     tags,
+                                     onRemoveTag,
+                                     // NEW:
+                                     estTimeSec,
+                                     onExportPath,
+                                     onImportFile,
+                                 }) {
     const lengthDisplay = toFixed(totalLength, 1);
-    const timeDisplay = totalLength > 0 ? (totalLength / Math.max(velocity || 1, 1)).toFixed(1) : "0.0";
+    const timeDisplay = Number.isFinite(estTimeSec) ? toFixed(estTimeSec, 1) : "0.0";
     const progress = totalLength > 0 ? Math.round((playDist / totalLength) * 100) : 0;
+
+    const fileInputRef = useRef(null);
 
     return (
         <aside className="panel panel-run">
@@ -53,7 +59,7 @@ export default function RunPanel({
                         <p>Preview the route before committing to the field.</p>
                     </div>
                     <div className="card-actions stack">
-                        <button className={`btn pill ${playState === "playing" ? "pill-active" : ""}`} onClick={onTogglePlay}>
+                        <button className={`btn ghost ${playState === "playing" ? "pill-active" : ""}`} onClick={onTogglePlay}>
                             {playState === "playing" ? "Pause preview" : "Play preview"}
                         </button>
                         <button className="btn ghost" onClick={onStop}>
@@ -67,14 +73,16 @@ export default function RunPanel({
                     </div>
                     <div className="progress-line">
                         <span className="small">Progress</span>
-                        <span className="small">{progress}% • {toFixed(playDist, 1)} / {lengthDisplay} in</span>
+                        <span className="small">
+              {progress}% • {toFixed(playDist, 1)} / {lengthDisplay} in
+            </span>
                     </div>
                 </section>
 
                 <section className="control-card">
                     <div className="card-header">
                         <h3>Manage Path</h3>
-                        <p>Undo or clear before exporting.</p>
+                        <p>Undo or clear points.</p>
                     </div>
                     <div className="card-actions stack">
                         <button className="btn ghost" onClick={onUndo}>
@@ -88,8 +96,31 @@ export default function RunPanel({
 
                 <section className="control-card">
                     <div className="card-header">
+                        <h3>Import / Export</h3>
+                        <p>Save or import path.</p>
+                    </div>
+                    <div className="card-actions stack">
+                        <button className="btn primary" onClick={onExportPath}>
+                            Export JSON
+                        </button>
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept="application/json,.json"
+                            className="input"
+                            onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                if (f) onImportFile(f);
+                                e.currentTarget.value = "";
+                            }}
+                        />
+                    </div>
+                </section>
+
+                <section className="control-card">
+                    <div className="card-header">
                         <h3>Generated Code</h3>
-                        <p>Paste into your robot project to mirror this plan.</p>
+                        <p>Paste into your robot's code to have the bot follow this path.</p>
                     </div>
                     <textarea className="code-box" readOnly value={code} />
                 </section>
@@ -115,34 +146,12 @@ export default function RunPanel({
                         </div>
                     </section>
                 )}
-
-                <section className="control-card">
-                    <div className="card-header">
-                        <h3>Legend</h3>
-                    </div>
-                    <div className="legend chips">
-                        <span><span className="dot" style={{background: "#ffd166"}} /> Start</span>
-                        <span><span className="dot" style={{background: "#cbd5e1"}} /> Waypoint</span>
-                        <span><span className="dot" style={{background: "#7aa2ff"}} /> Footprint</span>
-                        <span><span className="dot" style={{background: "#5cd2ff"}} /> Path line</span>
-                    </div>
-                </section>
-
-                <section className="control-card">
-                    <div className="card-header">
-                        <h3>Workflow Tips</h3>
-                    </div>
-                    <ul className="tip-list">
-                        <li>Place the start, choose a segment style, then click through waypoints.</li>
-                        <li>Enable grid snapping for quick alignment and cleaner paths.</li>
-                        <li>Tags latch to the latest waypoint—add them immediately after placing.</li>
-                        <li>Preview speed lets you test timing without impacting upload velocity.</li>
-                    </ul>
-                </section>
             </div>
         </aside>
     );
 }
+
+import {useRef} from "react";
 
 const Stat = ({label, value}) => (
     <div className="stat-card">

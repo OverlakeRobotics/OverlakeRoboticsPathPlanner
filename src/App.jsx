@@ -25,6 +25,128 @@ import {usePlayback} from "./hooks/usePlayback";
 import {clamp, num, normDeg, toFixed} from "./utils/math";
 import {polylineLength} from "./utils/path";
 
+const DEFAULT_MAX_ACCEL_IN_PER_S2 = 40;
+const SAMPLE_STEP_IN = 1;
+const EPS = 1e-6;
+
+function wrapAngleRad(a) {
+    // wrap to (-π, π]
+    let x = a % (2 * Math.PI);
+    if (x <= -Math.PI) x += 2 * Math.PI;
+    if (x > Math.PI) x -= 2 * Math.PI;
+    return x;
+}
+
+function buildSpeedProfile(waypoints, vmax_in_s, a_max_in_s2) {
+    const vmax = Math.max(EPS, Number(vmax_in_s) || 0);
+    const amax = Math.max(EPS, Number(a_max_in_s2) || 0);
+    const N = waypoints.length;
+    if (N < 2) {
+        return {
+            s: [0],
+            v: [0],
+            t: [0],
+            totalLen: 0,
+            totalTime: 0,
+            sOfT: () => 0,
+        };
+    }
+
+    const segLen = [];
+    const segDir = [];
+    let totalLen = 0;
+    for (let i = 0; i < N - 1; i++) {
+        const dx = waypoints[i + 1].x - waypoints[i].x;
+        const dy = waypoints[i + 1].y - waypoints[i].y;
+        const L = Math.hypot(dx, dy);
+        segLen.push(L);
+        segDir.push(Math.atan2(dy, dx));
+        totalLen += L;
+    }
+    if (totalLen < EPS) {
+        return {
+            s: [0],
+            v: [0],
+            t: [0],
+            totalLen: 0,
+            totalTime: 0,
+            sOfT: () => 0,
+        };
+    }
+
+    const kappaVertex = new Array(N).fill(0);
+    for (let i = 1; i < N - 1; i++) {
+        const d1 = segDir[i - 1];
+        const d2 = segDir[i];
+        const turn = Math.abs(wrapAngleRad(d2 - d1));
+        const dsLocal = Math.max(EPS, 0.5 * (segLen[i - 1] + segLen[i]));
+        kappaVertex[i] = turn / dsLocal;
+    }
+
+    const s = [0];
+    const kappa = [kappaVertex[0]];
+    let accS = 0;
+    for (let i = 0; i < N - 1; i++) {
+        const L = segLen[i];
+        if (L < EPS) continue;
+        const steps = Math.max(1, Math.round(L / SAMPLE_STEP_IN));
+        for (let j = 1; j <= steps; j++) {
+            const alpha = j / steps;
+            const sHere = accS + alpha * L;
+            const k = (1 - alpha) * kappaVertex[i] + alpha * kappaVertex[i + 1];
+            s.push(sHere);
+            kappa.push(k);
+        }
+        accS += L;
+    }
+    const M = s.length;
+
+    const vCurve = new Array(M);
+    for (let i = 0; i < M; i++) {
+        const k = Math.abs(kappa[i]);
+        if (k < 1e-8) vCurve[i] = Infinity;
+        else vCurve[i] = Math.sqrt(Math.max(EPS, amax / k));
+    }
+
+    const v = vCurve.map((vc) => Math.min(vmax, vc));
+
+    for (let i = 1; i < M; i++) {
+        const ds = s[i] - s[i - 1];
+        v[i] = Math.min(v[i], Math.sqrt(v[i - 1] * v[i - 1] + 2 * amax * ds));
+    }
+
+    for (let i = M - 2; i >= 0; i--) {
+        const ds = s[i + 1] - s[i];
+        v[i] = Math.min(v[i], Math.sqrt(v[i + 1] * v[i + 1] + 2 * amax * ds));
+    }
+
+    const t = new Array(M).fill(0);
+    for (let i = 1; i < M; i++) {
+        const ds = s[i] - s[i - 1];
+        const vAvg = Math.max(EPS, 0.5 * (v[i] + v[i - 1]));
+        t[i] = t[i - 1] + ds / vAvg;
+    }
+    const totalTime = t[M - 1];
+
+    function sOfT(time) {
+        if (time <= 0) return 0;
+        if (time >= totalTime) return totalLen;
+        // binary search in t[]
+        let lo = 0, hi = M - 1;
+        while (hi - lo > 1) {
+            const mid = (lo + hi) >> 1;
+            if (t[mid] <= time) lo = mid;
+            else hi = mid;
+        }
+        const dt = t[hi] - t[lo];
+        const alpha = dt > EPS ? (time - t[lo]) / dt : 0;
+        return s[lo] + alpha * (s[hi] - s[lo]);
+    }
+
+    return {s, v, t, totalLen, totalTime, sOfT};
+}
+
+
 export default function App() {
     const canvasSize = DEFAULT_CANVAS_SIZE;
     const [backgroundImage, setBackgroundImage] = useState(null);
@@ -51,6 +173,7 @@ export default function App() {
 
     const [velocity, setVelocity] = useState(DEFAULT_VELOCITY_IN_PER_S);
     const [playSpeed, setPlaySpeed] = useState(DEFAULT_PLAYBACK_SPEED_IN_PER_S);
+    const [maxAccel, setMaxAccel] = useState(DEFAULT_MAX_ACCEL_IN_PER_S2);
     const [tolerance, setTolerance] = useState(String(DEFAULT_TOLERANCE_IN));
     const [snapInches, setSnapInches] = useState(String(DEFAULT_SNAP_IN));
 
@@ -80,7 +203,6 @@ export default function App() {
     useEffect(() => {
         leftWidthRef.current = leftWidth;
     }, [leftWidth]);
-
     useEffect(() => {
         rightWidthRef.current = rightWidth;
     }, [rightWidth]);
@@ -92,17 +214,32 @@ export default function App() {
         return () => window.removeEventListener("resize", update);
     }, []);
 
-    const waypoints = useMemo(() => [{x: num(startPose.x), y: num(startPose.y)}, ...points.map((p) => ({x: p.x, y: p.y}))], [startPose, points]);
+    const waypoints = useMemo(
+        () => [{x: num(startPose.x), y: num(startPose.y)}, ...points.map((p) => ({x: p.x, y: p.y}))],
+        [startPose, points]
+    );
     const totalLength = useMemo(() => polylineLength(waypoints), [waypoints]);
     const endHeadingValue = useMemo(() => normDeg(num(endHeading)), [endHeading]);
 
+    const previewProfile = useMemo(
+        () => buildSpeedProfile(waypoints, playSpeed, maxAccel),
+        [waypoints, playSpeed, maxAccel]
+    );
+
+    const runProfile = useMemo(
+        () => buildSpeedProfile(waypoints, velocity, maxAccel),
+        [waypoints, velocity, maxAccel]
+    );
+
     const {
         playState,
-        playDist,
+        playDist: playTime, // seconds
         togglePlay,
         stop: stopPlayback,
-        setPlayDist,
-    } = usePlayback({totalLength, speed: playSpeed});
+        setPlayDist: setPlayTime,
+    } = usePlayback({totalLength: previewProfile.totalTime || 0, speed: 1});
+
+    const playDist = useMemo(() => previewProfile.sOfT(playTime || 0), [previewProfile, playTime]);
 
     useEffect(() => {
         stopPlayback();
@@ -141,21 +278,18 @@ export default function App() {
             const handleMove = (moveEvent) => {
                 if (moveEvent.pointerId !== pointerId) return;
                 const rect = container.getBoundingClientRect();
-                const totalWidth = rect.width;
-
                 if (side === "left") {
-                    const maxLeft = Math.max(MIN_LEFT, totalWidth - rightWidthRef.current - MIN_CENTER);
+                    const maxLeft = Math.max(MIN_LEFT, rect.width - rightWidthRef.current - MIN_CENTER);
                     const proposed = moveEvent.clientX - rect.left;
                     const next = clamp(proposed, MIN_LEFT, maxLeft);
                     setLeftWidth(next);
                 } else {
-                    const maxRight = Math.max(MIN_RIGHT, totalWidth - leftWidthRef.current - MIN_CENTER);
+                    const maxRight = Math.max(MIN_RIGHT, rect.width - leftWidthRef.current - MIN_CENTER);
                     const proposed = rect.right - moveEvent.clientX;
                     const next = clamp(proposed, MIN_RIGHT, maxRight);
                     setRightWidth(next);
                 }
             };
-
             const handleUp = (upEvent) => {
                 if (upEvent.pointerId !== pointerId) return;
                 window.removeEventListener("pointermove", handleMove);
@@ -170,10 +304,7 @@ export default function App() {
 
     const shellStyle = isNarrow
         ? undefined
-        : {
-              "--left-panel": `${leftWidth}px`,
-              "--right-panel": `${rightWidth}px`,
-          };
+        : { "--left-panel": `${leftWidth}px`, "--right-panel": `${rightWidth}px` };
 
     const togglePlaceStart = () => {
         setPreview(null);
@@ -213,16 +344,8 @@ export default function App() {
     };
 
     const undoLast = useCallback(() => {
-        if (bezierTemp) {
-            setBezierTemp(null);
-            setPreview(null);
-            return;
-        }
-        if (arcTemp) {
-            setArcTemp(null);
-            setPreview(null);
-            return;
-        }
+        if (bezierTemp) { setBezierTemp(null); setPreview(null); return; }
+        if (arcTemp)    { setArcTemp(null);    setPreview(null); return; }
         if (undoStack.length === 0) return;
         const last = undoStack[undoStack.length - 1];
         const removeCount = Math.max(0, last?.count ?? 0);
@@ -230,9 +353,7 @@ export default function App() {
         setUndoStack((prev) => prev.slice(0, -1));
     }, [bezierTemp, arcTemp, undoStack]);
 
-    useEffect(() => {
-        undoRef.current = undoLast;
-    }, [undoLast]);
+    useEffect(() => { undoRef.current = undoLast; }, [undoLast]);
 
     useEffect(() => {
         const handleKeyDown = (event) => {
@@ -243,7 +364,6 @@ export default function App() {
                 undoRef.current();
             }
         };
-
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
     }, []);
@@ -277,6 +397,7 @@ export default function App() {
         if (uploadTimerRef.current) clearTimeout(uploadTimerRef.current);
         setUploadStatus("sending");
         const payload = {
+            version: 1,
             start: [num(startPose.x), num(startPose.y), num(startPose.h)],
             points: points.map((p) => [Number(p.x), Number(p.y), Number(p.h ?? 0)]),
             velocity: Number(velocity) || 0,
@@ -311,8 +432,98 @@ export default function App() {
         const tagsBlock = tags
             .map((tag) => `    new Tag("${(tag.name ?? "").replace(/"/g, '\\"')}", ${Number(tag.value) || 0}, ${Number(tag.index) || 0})`)
             .join(",\n");
-        return `// ---- PATH ----\npublic static Pose2D[] path = new Pose2D[] {\n${poseLines}\n};\n\n// ---- TAGS ----\npublic static class Tag {\n    public final String name; public final int value; public final int index;\n    public Tag(String name, int value, int index){ this.name=name; this.value=value; this.index=index; }\n}\npublic static Tag[] tags = new Tag[] {\n${tagsBlock}\n};\n\n// ---- CONFIG ----\npublic static double VELOCITY_IN_S = ${toFixed(velocity, 2)};\npublic static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
-    }, [points, startPose, tags, velocity, tolerance]);
+        return `// ---- PATH ----
+public static Pose2D[] path = new Pose2D[] {
+${poseLines}
+};
+
+// ---- TAGS ----
+public static class Tag {
+    public final String name; public final int value; public final int index;
+    public Tag(String name, int value, int index){ this.name=name; this.value=value; this.index=index; }
+}
+public static Tag[] tags = new Tag[] {
+${tagsBlock}
+};
+
+// ---- CONFIG ----
+public static double VELOCITY_IN_S = ${toFixed(velocity, 2)};
+public static double MAX_ACCEL_IN_S2 = ${toFixed(Number(maxAccel) || 0, 2)};
+public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
+    }, [points, startPose, tags, velocity, maxAccel, tolerance]);
+
+    const buildSerializable = () => ({
+        version: 1,
+        createdAt: new Date().toISOString(),
+        start: {x: num(startPose.x), y: num(startPose.y), h: num(startPose.h)},
+        points: points.map((p) => ({x: Number(p.x), y: Number(p.y), h: Number(p.h ?? 0)})),
+        headingMode,
+        endHeading: endHeadingValue,
+        velocity: Number(velocity) || 0,
+        maxAccel: Number(maxAccel) || 0,
+        tolerance: Number(tolerance) || 0,
+        snapInches: Number(snapInches) || 0,
+        robot: {...robotDimensions},
+        tags: tags.map((t) => ({...t, index: Number(t.index) || 0, value: Number(t.value) || 0, name: String(t.name || "")})),
+    });
+
+    const onExportPath = () => {
+        const obj = buildSerializable();
+        const blob = new Blob([JSON.stringify(obj, null, 2)], {type: "application/json"});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `ftc_path_${Date.now()}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    };
+
+    const onImportPath = async (file) => {
+        try {
+            const text = await file.text();
+            const data = JSON.parse(text);
+            const getNum = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
+
+            if (data.start) {
+                if (Array.isArray(data.start)) {
+                    setStartPose({x: getNum(data.start[0]), y: getNum(data.start[1]), h: normDeg(getNum(data.start[2]))});
+                } else {
+                    setStartPose({x: getNum(data.start.x), y: getNum(data.start.y), h: normDeg(getNum(data.start.h))});
+                }
+            }
+            if (Array.isArray(data.points)) {
+                const pts = data.points.map((p) =>
+                    Array.isArray(p) ? {x: getNum(p[0]), y: getNum(p[1]), h: normDeg(getNum(p[2]))} :
+                        {x: getNum(p.x), y: getNum(p.y), h: normDeg(getNum(p.h))}
+                );
+                setPoints(pts);
+            }
+            if (typeof data.headingMode === "string") setHeadingMode(data.headingMode);
+            if (Number.isFinite(Number(data.endHeading))) setEndHeading(Number(data.endHeading));
+            if (Number.isFinite(Number(data.velocity))) setVelocity(Number(data.velocity));
+            if (Number.isFinite(Number(data.maxAccel))) setMaxAccel(Number(data.maxAccel));
+            if (Number.isFinite(Number(data.tolerance))) setTolerance(String(Number(data.tolerance)));
+            if (Number.isFinite(Number(data.snapInches))) setSnapInches(String(Number(data.snapInches)));
+            if (data.robot && typeof data.robot === "object") setRobotDimensions({...robotDimensions, ...data.robot});
+            if (Array.isArray(data.tags)) setTags(data.tags.map((t) => ({
+                name: String(t.name || ""),
+                value: getNum(t.value),
+                index: getNum(t.index),
+            })));
+
+            setBezierTemp(null);
+            setArcTemp(null);
+            setPreview(null);
+            setUndoStack([]);
+            setPlaceStart(false);
+            stopPlayback();
+        } catch (err) {
+            console.error("Failed to import path:", err);
+            alert("Could not import file. Make sure it's a valid path JSON.");
+        }
+    };
 
     const handleTogglePlay = () => {
         if (!points.length || totalLength <= 0) return;
@@ -321,8 +532,10 @@ export default function App() {
 
     const handleStop = () => {
         stopPlayback();
-        setPlayDist(0);
+        setPlayTime(0); // reset "time"
     };
+
+    const estRunTimeSeconds = runProfile.totalTime;
 
     return (
         <div className="app-shell" ref={layoutRef} style={shellStyle}>
@@ -339,6 +552,8 @@ export default function App() {
                 setEndHeading={setEndHeading}
                 velocity={velocity}
                 setVelocity={setVelocity}
+                maxAccel={maxAccel}
+                setMaxAccel={setMaxAccel}
                 playSpeed={playSpeed}
                 setPlaySpeed={setPlaySpeed}
                 tolerance={tolerance}
@@ -404,6 +619,7 @@ export default function App() {
                     playState={playState}
                     playDist={playDist}
                     waypoints={waypoints}
+                    previewMarker="dotArrow"
                 />
             </div>
 
@@ -434,6 +650,9 @@ export default function App() {
                 onClear={clearAll}
                 tags={tags}
                 onRemoveTag={removeTag}
+                estTimeSec={estRunTimeSeconds}
+                onExportPath={onExportPath}
+                onImportFile={onImportPath}
             />
         </div>
     );
