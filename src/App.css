@@ -297,6 +297,26 @@ textarea.code-box {
   color: #052036;
 }
 
+.btn.run {
+  background: linear-gradient(180deg, #c1a3ff, #8d6bff);
+  color: #1e0b46;
+}
+
+.btn.run-sending {
+  background: linear-gradient(180deg, #e0c8ff, #b28bff);
+  color: #1f0b3e;
+}
+
+.btn.run-ok {
+  background: linear-gradient(180deg, #9ff4ff, #5bd2f0);
+  color: #05283b;
+}
+
+.btn.run-fail {
+  background: linear-gradient(180deg, #ffb0ec, #ff82dc);
+  color: #3d0b2f;
+}
+
 .btn.ok {
   background: linear-gradient(180deg, #7df19a, #44c55c);
   color: #062719;

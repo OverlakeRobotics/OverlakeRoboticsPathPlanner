@@ -23,6 +23,7 @@ export const POSE_POLL_INTERVAL_MS = 10;
 export const HUB_IP = "192.168.43.1";
 export const HUB_POINTS_URL = `http://${HUB_IP}:8099/points`;
 export const HUB_POSE_URL = `http://${HUB_IP}:8099/pose`;
+export const HUB_RUN_URL = `http://${HUB_IP}:8099/run`;
 
 export const UPLOAD_RESET_OK_MS = 1800;
 export const UPLOAD_RESET_FAIL_MS = 2200;

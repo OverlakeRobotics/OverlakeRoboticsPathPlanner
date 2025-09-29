@@ -16,6 +16,7 @@ import {
     DEFAULT_RIGHT_PANEL_WIDTH,
     GRID_DEFAULT_STEP,
     HUB_POINTS_URL,
+    HUB_RUN_URL,
     LIVE_POSE_SYNC_PREFIX,
     UPLOAD_RESET_FAIL_MS,
     UPLOAD_RESET_OK_MS,
@@ -189,7 +190,9 @@ export default function App() {
 
     const [copied, setCopied] = useState(false);
     const [uploadStatus, setUploadStatus] = useState("idle");
+    const [runStatus, setRunStatus] = useState("idle");
     const uploadTimerRef = useRef(null);
+    const runTimerRef = useRef(null);
     const undoRef = useRef(() => {});
 
     const {livePose, robotState} = usePosePolling();
@@ -262,6 +265,7 @@ export default function App() {
 
     useEffect(() => () => {
         if (uploadTimerRef.current) clearTimeout(uploadTimerRef.current);
+        if (runTimerRef.current) clearTimeout(runTimerRef.current);
     }, []);
 
     const beginResize = useCallback(
@@ -416,6 +420,26 @@ export default function App() {
             .catch(() => {
                 setUploadStatus("fail");
                 uploadTimerRef.current = setTimeout(() => setUploadStatus("idle"), UPLOAD_RESET_FAIL_MS);
+            });
+    };
+
+    const doRun = () => {
+        if (runTimerRef.current) clearTimeout(runTimerRef.current);
+        setRunStatus("sending");
+        fetch(HUB_RUN_URL, {
+            method: "POST",
+        })
+            .then((response) => {
+                if (!response.ok) throw new Error("Run request failed");
+                return response.json().catch(() => null);
+            })
+            .then(() => {
+                setRunStatus("ok");
+                runTimerRef.current = setTimeout(() => setRunStatus("idle"), UPLOAD_RESET_OK_MS);
+            })
+            .catch(() => {
+                setRunStatus("fail");
+                runTimerRef.current = setTimeout(() => setRunStatus("idle"), UPLOAD_RESET_FAIL_MS);
             });
     };
 
@@ -635,7 +659,9 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
 
             <RunPanel
                 onUpload={doUpload}
+                onRun={doRun}
                 uploadStatus={uploadStatus}
+                runStatus={runStatus}
                 onCopy={copyCode}
                 copied={copied}
                 playState={playState}

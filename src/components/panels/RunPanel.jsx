@@ -4,9 +4,23 @@ const uploadLabel = (status) =>
 const uploadClass = (status) =>
     status === "ok" ? "btn ok" : status === "fail" ? "btn danger" : status === "sending" ? "btn warn" : "btn primary";
 
+const runLabel = (status) =>
+    status === "sending" ? "Queuing…" : status === "ok" ? "Queued" : status === "fail" ? "Failed Run" : "Run";
+
+const runClass = (status) =>
+    status === "ok"
+        ? "btn run-ok"
+        : status === "fail"
+            ? "btn run-fail"
+            : status === "sending"
+                ? "btn run-sending"
+                : "btn run";
+
 export default function RunPanel({
                                      onUpload,
+                                     onRun,
                                      uploadStatus,
+                                     runStatus,
                                      onCopy,
                                      copied,
                                      playState,
@@ -46,6 +60,9 @@ export default function RunPanel({
                     <div className="card-actions stack">
                         <button className={uploadClass(uploadStatus)} onClick={onUpload}>
                             {uploadLabel(uploadStatus)}
+                        </button>
+                        <button className={runClass(runStatus)} onClick={onRun}>
+                            {runLabel(runStatus)}
                         </button>
                         <button className="btn ghost" onClick={onCopy}>
                             {copied ? "Copied!" : "Copy code"}
