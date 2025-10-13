@@ -1,16 +1,26 @@
-import {FIELD_SIZE_IN} from "../constants/config";
+import {
+    FIELD_SIZE_IN,
+    FIELD_EDGE_IN,
+    PATH_COLOR,
+    START_COLOR,
+    WAYPOINT_COLOR,
+    LAST_POINT_COLOR,
+    FOOTPRINT_FILL,
+    LIVE_POSE_FILL,
+    PREVIEW_FILL,
+    DRAW_RAW_COLOR,
+    DRAW_FIT_COLOR,
+    DRAW_LABEL_FILL,
+    DRAW_LABEL_STROKE,
+    MIN_DRAW_SAMPLE_SPACING_IN,
+    MIN_DRAW_SEGMENT_LEN_IN,
+    DRAW_SIMPLIFY_TOLERANCE_IN,
+} from "../constants/config";
 import {headingVector, perpendicularHeading} from "./geometry";
 import {canvasToWorld, headingFromDelta, rotateLocalToWorld, snapToField, worldToCanvas} from "./geometry";
-import {getSegmentProgress, sampleCircularArcThrough, sampleQuadraticBezier} from "./path";
-import {num, normDeg, shortestDeltaDeg} from "./math";
-
-const PATH_COLOR = "#5cd2ff";
-const START_COLOR = "#ffd166";
-const WAYPOINT_COLOR = "#cbd5e1";
-const LAST_POINT_COLOR = "#ffffff";
-const FOOTPRINT_FILL = "#6be675";
-const LIVE_POSE_FILL = "#ff6ad5";
-const PREVIEW_FILL = "#94e2b8";
+import {getSegmentProgress, polylineLength, sampleCircularArcThrough, sampleQuadraticBezier} from "./path";
+import {computeDrawCandidates} from "./drawFit";
+import {clamp, num, normDeg, shortestDeltaDeg} from "./math";
 
 export const prepareCanvas = (canvas, overlay, size, dpr) => {
     const width = size * dpr;
@@ -49,6 +59,7 @@ export const drawPlannerScene = ({
     playState,
     playDist,
     waypoints,
+    drawTemp,
 }) => {
     if (!canvasCtx || !overlayCtx) return;
 
@@ -85,6 +96,7 @@ export const drawPlannerScene = ({
         bezierTemp,
         arcTemp,
     });
+    drawDrawOverlay(overlayCtx, {drawTemp, center, ppi});
     drawPlayback(overlayCtx, {
         playState,
         playDist,
@@ -341,6 +353,96 @@ const drawStraightPreview = (ctx, anchor, preview, center, ppi, robot) => {
     ctx.restore();
 };
 
+const drawDrawOverlay = (ctx, {drawTemp, center, ppi}) => {
+    if (!drawTemp) return;
+    const {raw, fit, candidates, cursorWorld, isDrawing} = drawTemp;
+    if (raw?.length >= 2) {
+        ctx.save();
+        ctx.strokeStyle = DRAW_RAW_COLOR;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+        const first = worldToCanvas(raw[0].x, raw[0].y, center.x, center.y, ppi);
+        ctx.beginPath();
+        ctx.moveTo(first.cx, first.cy);
+        raw.slice(1).forEach((point) => {
+            const pos = worldToCanvas(point.x, point.y, center.x, center.y, ppi);
+            ctx.lineTo(pos.cx, pos.cy);
+        });
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    if (fit) {
+        const previewPoints = fit.previewSamples?.length ? fit.previewSamples : [fit.anchor, fit.end];
+        if (previewPoints.length >= 2) {
+            ctx.save();
+            ctx.strokeStyle = DRAW_FIT_COLOR;
+            ctx.lineWidth = 3;
+            ctx.setLineDash([12, 6]);
+            const start = worldToCanvas(previewPoints[0].x, previewPoints[0].y, center.x, center.y, ppi);
+            ctx.beginPath();
+            ctx.moveTo(start.cx, start.cy);
+            previewPoints.slice(1).forEach((point) => {
+                const pos = worldToCanvas(point.x, point.y, center.x, center.y, ppi);
+                ctx.lineTo(pos.cx, pos.cy);
+            });
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            const endCanvas = worldToCanvas(fit.end.x, fit.end.y, center.x, center.y, ppi);
+            ctx.fillStyle = "#ffffff";
+            ctx.strokeStyle = DRAW_FIT_COLOR;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(endCanvas.cx, endCanvas.cy, 5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+
+            const label = fit?.label ?? (fit?.type === "bezier" ? "Curve" : fit?.type === "arc" ? "Arc" : "Line");
+            ctx.font = "12px/1.2 \"Inter\", \"Segoe UI\", sans-serif";
+            ctx.textAlign = "left";
+            ctx.textBaseline = "middle";
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = DRAW_LABEL_STROKE;
+            ctx.strokeText(label, endCanvas.cx + 10, endCanvas.cy);
+            ctx.fillStyle = DRAW_LABEL_FILL;
+            ctx.fillText(label, endCanvas.cx + 10, endCanvas.cy);
+
+            if (candidates?.length) {
+                const hint = "Shift=line  Alt=arc  Ctrl=curve  Cmd/Alt+Shift=free";
+                ctx.font = "10px/1.4 \"Inter\", \"Segoe UI\", sans-serif";
+                ctx.textBaseline = "top";
+                const hintY = endCanvas.cy + 10;
+                ctx.lineWidth = 3;
+                ctx.strokeStyle = DRAW_LABEL_STROKE;
+                ctx.strokeText(hint, endCanvas.cx + 10, hintY);
+                ctx.fillStyle = DRAW_LABEL_FILL;
+                ctx.fillText(hint, endCanvas.cx + 10, hintY);
+            }
+            ctx.restore();
+        }
+    }
+
+    if (cursorWorld) drawDrawCursor(ctx, cursorWorld, center, ppi, Boolean(isDrawing));
+};
+
+const drawDrawCursor = (ctx, cursorWorld, center, ppi, active) => {
+    const pos = worldToCanvas(cursorWorld.x, cursorWorld.y, center.x, center.y, ppi);
+    ctx.save();
+    ctx.strokeStyle = active ? "#f8fafc" : "#cbd5e1";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(pos.cx, pos.cy, 9, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(pos.cx - 12, pos.cy);
+    ctx.lineTo(pos.cx + 12, pos.cy);
+    ctx.moveTo(pos.cx, pos.cy - 12);
+    ctx.lineTo(pos.cx, pos.cy + 12);
+    ctx.stroke();
+    ctx.restore();
+};
+
 const drawPlayback = (ctx, {playState, playDist, waypoints, startPose, points, center, ppi, robot}) => {
     if (playState === "stopped" || !points.length) return;
     const progress = getSegmentProgress(waypoints, playDist);
@@ -451,6 +553,75 @@ const resolvePreviewHeading = (headingMode, tangent, endHeading, anchor) => {
     return num(anchor?.h ?? 0);
 };
 
+const enforceSpacing = (points, minSpacing) => {
+    if (!points?.length) return [];
+    const result = [points[0]];
+    for (let i = 1; i < points.length; i += 1) {
+        const curr = points[i];
+        const last = result[result.length - 1];
+        const dist = Math.hypot(curr.x - last.x, curr.y - last.y);
+        if (dist >= minSpacing || i === points.length - 1) {
+            result.push(curr);
+        }
+    }
+    return result;
+};
+
+const pointToSegmentDistance = (point, start, end) => {
+    const dx = (end.x ?? 0) - (start.x ?? 0);
+    const dy = (end.y ?? 0) - (start.y ?? 0);
+    const denom = Math.hypot(dx, dy);
+    if (denom < 1e-9) return Math.hypot((point.x ?? 0) - (start.x ?? 0), (point.y ?? 0) - (start.y ?? 0));
+    return Math.abs(dy * (point.x - start.x) - dx * (point.y - start.y)) / denom;
+};
+
+const douglasPeuckerSimplify = (points, epsilon) => {
+    if (!points || points.length <= 2) return points ? points.slice() : [];
+    let maxDist = 0;
+    let index = 0;
+    const start = points[0];
+    const end = points[points.length - 1];
+    for (let i = 1; i < points.length - 1; i += 1) {
+        const dist = pointToSegmentDistance(points[i], start, end);
+        if (dist > maxDist) {
+            maxDist = dist;
+            index = i;
+        }
+    }
+    if (maxDist > epsilon) {
+        const left = douglasPeuckerSimplify(points.slice(0, index + 1), epsilon);
+        const right = douglasPeuckerSimplify(points.slice(index), epsilon);
+        return [...left.slice(0, -1), ...right];
+    }
+    return [start, end];
+};
+
+const simplifyDrawStroke = (points) => {
+    if (!points?.length) return [];
+    const spaced = enforceSpacing(points, MIN_DRAW_SAMPLE_SPACING_IN * 0.6);
+    if (spaced.length <= 2) return spaced.slice();
+    const simplified = douglasPeuckerSimplify(spaced, DRAW_SIMPLIFY_TOLERANCE_IN);
+    return simplified.length >= 2 ? simplified : spaced.slice();
+};
+
+const clampPointToField = (point) => ({
+    x: clamp(point.x, -FIELD_EDGE_IN, FIELD_EDGE_IN),
+    y: clamp(point.y, -FIELD_EDGE_IN, FIELD_EDGE_IN),
+});
+
+const releasePointerCapture = (state) => {
+    if (!state) return;
+    if (state.pointerTarget && typeof state.pointerTarget.releasePointerCapture === "function" && state.pointerId != null) {
+        try {
+            state.pointerTarget.releasePointerCapture(state.pointerId);
+        } catch (error) {
+            // ignore inability to release capture
+        }
+    }
+    state.pointerTarget = null;
+    state.pointerId = null;
+};
+
 export const createCanvasInteraction = ({
     canvasSize,
     center,
@@ -468,26 +639,333 @@ export const createCanvasInteraction = ({
     setPendingArc,
     arcTemp,
     setPreview,
+    drawStateRef,
+    setDrawTemp,
 }) => {
-    const handlePointer = (clientX, clientY, rect) => {
+    const pointerToWorld = (clientX, clientY, rect) => {
         const cx = (clientX - rect.left) * (canvasSize / rect.width);
         const cy = (clientY - rect.top) * (canvasSize / rect.height);
         const world = canvasToWorld(cx, cy, center.x, center.y, ppi);
+        return clampPointToField(world);
+    };
+
+    const ensureDrawState = () => {
+        if (!drawStateRef) return null;
+        if (!drawStateRef.current) {
+            drawStateRef.current = {
+                drawing: false,
+                raw: [],
+                hasMovement: false,
+                startPointer: null,
+                cursorWorld: null,
+                pointerId: null,
+                pointerTarget: null,
+            };
+        }
+        if (!drawStateRef.current.raw) drawStateRef.current.raw = [];
+        if (typeof drawStateRef.current.hasMovement !== "boolean") drawStateRef.current.hasMovement = false;
+        if (!drawStateRef.current.startPointer) drawStateRef.current.startPointer = null;
+        if (!Array.isArray(drawStateRef.current.candidates)) drawStateRef.current.candidates = [];
+        if (typeof drawStateRef.current.selectedIndex !== "number") drawStateRef.current.selectedIndex = undefined;
+        if (!drawStateRef.current.cursorWorld) drawStateRef.current.cursorWorld = null;
+        if (typeof drawStateRef.current.pointerId !== "number") drawStateRef.current.pointerId = null;
+        if (!drawStateRef.current.pointerTarget) drawStateRef.current.pointerTarget = null;
+        return drawStateRef.current;
+    };
+
+    const updateDrawTemp = (state) => {
+        if (!setDrawTemp) return;
+        if (!state) {
+            setDrawTemp(null);
+            return;
+        }
+        const rawCopy = state.raw ? state.raw.map((p) => ({x: p.x, y: p.y})) : [];
+        const cursorWorld = state.cursorWorld ? {x: state.cursorWorld.x, y: state.cursorWorld.y} : null;
+        if (rawCopy.length >= 2) {
+            const {candidates, bestIndex} = computeDrawCandidates(state.anchor, rawCopy);
+            state.candidates = candidates;
+            let selectedIndex = typeof state.selectedIndex === "number" ? state.selectedIndex : bestIndex;
+            if (candidates.length) {
+                selectedIndex = clamp(selectedIndex ?? 0, 0, candidates.length - 1);
+                state.selectedIndex = selectedIndex;
+            } else {
+                state.selectedIndex = undefined;
+            }
+            const fit = candidates.length ? candidates[selectedIndex] ?? null : null;
+            setDrawTemp({
+                anchor: state.anchor,
+                raw: rawCopy,
+                candidates,
+                selectedIndex: candidates.length ? selectedIndex : -1,
+                cursorWorld,
+                isDrawing: state.drawing,
+                fit,
+            });
+            return;
+        }
+        state.candidates = [];
+        state.selectedIndex = undefined;
+        setDrawTemp({
+            anchor: state.anchor,
+            raw: rawCopy,
+            candidates: [],
+            selectedIndex: -1,
+            cursorWorld,
+            isDrawing: state.drawing,
+            fit: null,
+        });
+    };
+
+    const handlePointer = (clientX, clientY, rect) => {
+        const state = drawStateRef?.current;
+        if (state?.drawing) return null;
+        const world = pointerToWorld(clientX, clientY, rect);
         const snapped = snapToField(world.x, world.y, snapStep());
-        const heading = placeStart ? num(startPose.h) : computeHeading(snapped.x, snapped.y);
-        setPreview({x: snapped.x, y: snapped.y, h: heading});
+        if (placeStart) {
+            const heading = num(startPose.h);
+            setPreview({x: snapped.x, y: snapped.y, h: heading});
+        } else if (shapeType !== "draw") {
+            const heading = computeHeading(snapped.x, snapped.y);
+            setPreview({x: snapped.x, y: snapped.y, h: heading});
+        } else {
+            const anchor = appendPoints.getAnchor();
+            if (anchor) setPreview({x: anchor.x, y: anchor.y, h: num(anchor.h ?? startPose.h)});
+            else setPreview(null);
+        }
         return {snapped};
     };
 
-    const onMouseMove = (event) => {
-        handlePointer(event.clientX, event.clientY, event.currentTarget.getBoundingClientRect());
+    const appendDrawPoint = (state, clientX, clientY, rect, force = false) => {
+        if (!state) return false;
+        const world = pointerToWorld(clientX, clientY, rect);
+        let point = {x: world.x, y: world.y};
+        if (state.anchor && state.startPointer) {
+            const dx = world.x - state.startPointer.x;
+            const dy = world.y - state.startPointer.y;
+            point = {x: state.anchor.x + dx, y: state.anchor.y + dy};
+        }
+        point = clampPointToField(point);
+        state.cursorWorld = point;
+        const raw = state.raw || [];
+        if (raw.length) {
+            const last = raw[raw.length - 1];
+            const dist = Math.hypot(point.x - last.x, point.y - last.y);
+            const threshold = force ? MIN_DRAW_SAMPLE_SPACING_IN * 0.25 : MIN_DRAW_SAMPLE_SPACING_IN;
+            if (dist < threshold) return false;
+        }
+        raw.push(point);
+        state.raw = raw;
+        if (raw.length > 1) state.hasMovement = true;
+        return true;
     };
 
-    const onMouseLeave = () => setPreview(null);
+    const resetDrawState = () => {
+        const state = ensureDrawState();
+        if (!state) return;
+        releasePointerCapture(state);
+        state.drawing = false;
+        state.anchor = null;
+        state.raw = [];
+        state.hasMovement = false;
+        state.startPointer = null;
+        state.candidates = [];
+        state.selectedIndex = undefined;
+        state.cursorWorld = null;
+    };
+
+    const appendFreehandStroke = (rawCopy) => {
+        if (!rawCopy?.length) return false;
+        const simplified = simplifyDrawStroke(rawCopy);
+        if (simplified.length < 2) return false;
+        if (polylineLength(simplified) <= MIN_DRAW_SEGMENT_LEN_IN) return false;
+        const samples = simplified.slice(1).map((point, index) => {
+            const prev = simplified[index];
+            return {
+                x: point.x,
+                y: point.y,
+                tangent: {dx: point.x - prev.x, dy: point.y - prev.y},
+            };
+        });
+        appendPoints.fromSamples(samples, "draw");
+        return true;
+    };
+
+    const evaluateDrawSelection = (state, rawCopy, modifiers) => {
+        const {candidates, bestIndex} = computeDrawCandidates(state.anchor, rawCopy);
+        state.candidates = candidates;
+        const wantsFreehand = Boolean(modifiers?.metaKey) || (modifiers?.altKey && modifiers?.shiftKey);
+        if (!candidates.length) {
+            state.selectedIndex = undefined;
+            return {selection: null, wantsFreehand, candidates, bestIndex};
+        }
+
+        let selectedIndex = typeof state.selectedIndex === "number" ? state.selectedIndex : bestIndex;
+        if (Number.isNaN(selectedIndex)) selectedIndex = bestIndex;
+
+        if (!wantsFreehand) {
+            let forcedType = null;
+            if (modifiers?.ctrlKey) forcedType = "bezier";
+            else if (modifiers?.altKey) forcedType = "arc";
+            else if (modifiers?.shiftKey) forcedType = "line";
+            if (forcedType) {
+                const forcedIndex = candidates.findIndex((candidate) => candidate.type === forcedType);
+                if (forcedIndex >= 0) selectedIndex = forcedIndex;
+            }
+        }
+
+        if (selectedIndex == null || selectedIndex < 0 || selectedIndex >= candidates.length) {
+            selectedIndex = bestIndex >= 0 ? bestIndex : 0;
+        }
+        state.selectedIndex = selectedIndex;
+
+        const selection = wantsFreehand ? null : candidates[selectedIndex];
+        return {selection, wantsFreehand, candidates, bestIndex};
+    };
+
+    const commitDrawSegment = (modifiers = {}) => {
+        const state = drawStateRef?.current;
+        if (!state || !state.anchor || !state.raw || state.raw.length < 2) {
+            updateDrawTemp(null);
+            resetDrawState();
+            return;
+        }
+        const rawCopy = state.raw.map((p) => ({x: p.x, y: p.y}));
+        const {selection, wantsFreehand} = evaluateDrawSelection(state, rawCopy, modifiers);
+        updateDrawTemp(null);
+        resetDrawState();
+
+        if (wantsFreehand || !selection) {
+            appendFreehandStroke(rawCopy);
+            return;
+        }
+
+        if (!(selection.length > MIN_DRAW_SEGMENT_LEN_IN)) {
+            if (!appendFreehandStroke(rawCopy)) appendFreehandStroke(selection.previewSamples ?? rawCopy);
+            return;
+        }
+
+        if (selection.type === "line") {
+            appendPoints.single(selection.end.x, selection.end.y);
+            return;
+        }
+        if (selection.type === "bezier") {
+            const samples = sampleQuadraticBezier(selection.anchor, selection.control, selection.end);
+            appendPoints.fromSamples(samples, "bezier");
+            return;
+        }
+        if (selection.type === "arc") {
+            const samples = sampleCircularArcThrough(selection.anchor, selection.mid, selection.end);
+            appendPoints.fromSamples(samples, "arc");
+            return;
+        }
+
+        appendFreehandStroke(rawCopy);
+    };
+
+    const beginDraw = (event) => {
+        if (shapeType !== "draw" || placeStart) return false;
+        if (typeof event.preventDefault === "function") event.preventDefault();
+        const state = ensureDrawState();
+        if (!state) return false;
+        const anchorSource = appendPoints.getAnchor();
+        const anchor = {x: anchorSource.x, y: anchorSource.y, h: anchorSource.h};
+        state.drawing = true;
+        state.anchor = anchor;
+        state.raw = [{x: anchor.x, y: anchor.y}];
+        state.hasMovement = false;
+        state.ignoreClick = false;
+        state.candidates = [];
+        state.selectedIndex = undefined;
+        state.cursorWorld = {x: anchor.x, y: anchor.y};
+        const rect = event.currentTarget.getBoundingClientRect();
+        const startWorld = pointerToWorld(event.clientX, event.clientY, rect);
+        state.startPointer = startWorld;
+        if (typeof event.pointerId === "number" && typeof event.currentTarget.setPointerCapture === "function") {
+            try {
+                event.currentTarget.setPointerCapture(event.pointerId);
+                state.pointerId = event.pointerId;
+                state.pointerTarget = event.currentTarget;
+            } catch (error) {
+                state.pointerId = null;
+                state.pointerTarget = null;
+            }
+        }
+        setPreview(null);
+        updateDrawTemp(state);
+        return true;
+    };
+
+    const onPointerDown = (event) => {
+        if (beginDraw(event)) return;
+        if (shapeType === "draw") setPreview(null);
+    };
+
+    const onPointerMove = (event) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        const state = drawStateRef?.current;
+        if (state?.drawing) {
+            const appended = appendDrawPoint(state, event.clientX, event.clientY, rect, false);
+            if (appended || state.cursorWorld) updateDrawTemp(state);
+            return;
+        }
+        handlePointer(event.clientX, event.clientY, rect);
+    };
+
+    const onPointerUp = (event) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        const state = drawStateRef?.current;
+        if (state?.drawing) {
+            if (state.hasMovement) {
+                appendDrawPoint(state, event.clientX, event.clientY, rect, true);
+                updateDrawTemp(state);
+                commitDrawSegment({
+                    shiftKey: event.shiftKey,
+                    altKey: event.altKey,
+                    ctrlKey: event.ctrlKey,
+                    metaKey: event.metaKey,
+                });
+            } else {
+                updateDrawTemp(null);
+                resetDrawState();
+            }
+            state.ignoreClick = true;
+            return;
+        }
+    };
+
+    const onPointerLeave = () => {
+        const state = drawStateRef?.current;
+        if (state?.drawing) {
+            updateDrawTemp(state);
+        } else {
+            setPreview(null);
+        }
+    };
+
+    const cancelDraw = () => {
+        const state = drawStateRef?.current;
+        if (!state?.drawing) return;
+        updateDrawTemp(null);
+        resetDrawState();
+        state.ignoreClick = true;
+        const anchor = appendPoints.getAnchor();
+        if (anchor) setPreview({x: anchor.x, y: anchor.y, h: num(anchor.h ?? startPose.h ?? 0)});
+    };
+
+    const onPointerCancel = () => {
+        cancelDraw();
+    };
 
     const onClick = (event) => {
+        const state = drawStateRef?.current;
+        if (state?.ignoreClick) {
+            state.ignoreClick = false;
+            return;
+        }
         const rect = event.currentTarget.getBoundingClientRect();
-        const {snapped} = handlePointer(event.clientX, event.clientY, rect);
+        const result = handlePointer(event.clientX, event.clientY, rect);
+        if (!result) return;
+        const {snapped} = result;
         if (placeStart) {
             setStartPose((prev) => ({...prev, x: snapped.x, y: snapped.y}));
             setPlaceStart(false);
@@ -519,7 +997,7 @@ export const createCanvasInteraction = ({
         appendPoints.single(snapped.x, snapped.y);
     };
 
-    return {onMouseMove, onMouseLeave, onClick};
+    return {onPointerDown, onPointerMove, onPointerUp, onPointerLeave, onPointerCancel, onClick, cancelDraw};
 };
 
 export const createAppendPointsApi = ({

@@ -7,6 +7,7 @@ import BuildPanel from "./components/panels/BuildPanel";
 import RunPanel from "./components/panels/RunPanel";
 import {
     DEFAULT_CANVAS_SIZE,
+    DEFAULT_MAX_ACCEL_IN_PER_S2,
     DEFAULT_PLAYBACK_SPEED_IN_PER_S,
     DEFAULT_ROBOT_DIMENSIONS,
     DEFAULT_SNAP_IN,
@@ -14,10 +15,14 @@ import {
     DEFAULT_VELOCITY_IN_PER_S,
     DEFAULT_LEFT_PANEL_WIDTH,
     DEFAULT_RIGHT_PANEL_WIDTH,
+    MIN_LEFT_PANEL_WIDTH,
+    MIN_RIGHT_PANEL_WIDTH,
     GRID_DEFAULT_STEP,
     HUB_POINTS_URL,
     HUB_RUN_URL,
+    EPS,
     LIVE_POSE_SYNC_PREFIX,
+    SPEED_PROFILE_SAMPLE_STEP_IN,
     UPLOAD_RESET_FAIL_MS,
     UPLOAD_RESET_OK_MS,
 } from "./constants/config";
@@ -25,10 +30,6 @@ import {usePosePolling} from "./hooks/usePosePolling";
 import {usePlayback} from "./hooks/usePlayback";
 import {clamp, num, normDeg, toFixed} from "./utils/math";
 import {polylineLength} from "./utils/path";
-
-const DEFAULT_MAX_ACCEL_IN_PER_S2 = 40;
-const SAMPLE_STEP_IN = 1;
-const EPS = 1e-6;
 
 function wrapAngleRad(a) {
     // wrap to (-π, π]
@@ -90,7 +91,7 @@ function buildSpeedProfile(waypoints, vmax_in_s, a_max_in_s2) {
     for (let i = 0; i < N - 1; i++) {
         const L = segLen[i];
         if (L < EPS) continue;
-        const steps = Math.max(1, Math.round(L / SAMPLE_STEP_IN));
+        const steps = Math.max(1, Math.round(L / SPEED_PROFILE_SAMPLE_STEP_IN));
         for (let j = 1; j <= steps; j++) {
             const alpha = j / steps;
             const sHere = accS + alpha * L;
@@ -187,6 +188,7 @@ export default function App() {
     const [preview, setPreview] = useState(null);
     const [bezierTemp, setBezierTemp] = useState(null);
     const [arcTemp, setArcTemp] = useState(null);
+    const [drawTemp, setDrawTemp] = useState(null);
 
     const [copied, setCopied] = useState(false);
     const [uploadStatus, setUploadStatus] = useState("idle");
@@ -275,8 +277,8 @@ export default function App() {
             if (!container) return;
             event.preventDefault();
             const pointerId = event.pointerId;
-            const MIN_LEFT = 240;
-            const MIN_RIGHT = 240;
+            const MIN_LEFT = MIN_LEFT_PANEL_WIDTH;
+            const MIN_RIGHT = MIN_RIGHT_PANEL_WIDTH;
             const MIN_CENTER = canvasSize;
 
             const handleMove = (moveEvent) => {
@@ -312,6 +314,7 @@ export default function App() {
 
     const togglePlaceStart = () => {
         setPreview(null);
+        setDrawTemp(null);
         setPlaceStart((prev) => {
             const next = !prev;
             if (next) clearAll();
@@ -326,6 +329,7 @@ export default function App() {
         setBezierTemp(null);
         setArcTemp(null);
         setPreview(null);
+        setDrawTemp(null);
         stopPlayback();
     };
 
@@ -569,6 +573,8 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                     setShapeType(type);
                     setBezierTemp(null);
                     setArcTemp(null);
+                    setDrawTemp(null);
+                    setPreview(null);
                 }}
                 headingMode={headingMode}
                 setHeadingMode={setHeadingMode}
@@ -638,6 +644,8 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                     setBezierTemp={setBezierTemp}
                     arcTemp={arcTemp}
                     setArcTemp={setArcTemp}
+                    drawTemp={drawTemp}
+                    setDrawTemp={setDrawTemp}
                     robot={robotDimensions}
                     livePose={livePose}
                     playState={playState}

@@ -84,6 +84,7 @@ export default function BuildPanel({
                     {openSections.segment && (
                         <div className="button-group" id="segment-card">
                             <SegmentButton label="Line" active={shapeType === "line"} onClick={() => setShapeType("line")} />
+                            <SegmentButton label="Draw" active={shapeType === "draw"} onClick={() => setShapeType("draw")} />
                             <SegmentButton label="Bézier Curve" active={shapeType === "bezier"} onClick={() => setShapeType("bezier")} />
                             <SegmentButton label="Circular Arc" active={shapeType === "arc"} onClick={() => setShapeType("arc")} />
                         </div>

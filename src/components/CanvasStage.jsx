@@ -33,6 +33,8 @@ export default function CanvasStage({
                                         setBezierTemp,
                                         arcTemp,
                                         setArcTemp,
+                                        drawTemp,
+                                        setDrawTemp,
                                         robot,
                                         livePose,
                                         playState,
@@ -42,6 +44,7 @@ export default function CanvasStage({
     const canvasRef = useRef(null);
     const overlayRef = useRef(null);
     const [dpr, setDpr] = useState(getDevicePixelRatio);
+    const drawStateRef = useRef({drawing: false});
 
     useEffect(() => {
         const handle = () => setDpr(getDevicePixelRatio());
@@ -97,6 +100,8 @@ export default function CanvasStage({
                 setPendingArc: setArcTemp,
                 arcTemp,
                 setPreview,
+                drawStateRef,
+                setDrawTemp,
             }),
         [
             canvasSize,
@@ -115,8 +120,28 @@ export default function CanvasStage({
             setArcTemp,
             arcTemp,
             setPreview,
+            setDrawTemp,
         ],
     );
+
+    const cancelDraw = handlers.cancelDraw;
+
+    useEffect(() => {
+        const handleKeyDown = (event) => {
+            if (event.key === "Escape") cancelDraw();
+        };
+        window.addEventListener("keydown", handleKeyDown);
+        return () => window.removeEventListener("keydown", handleKeyDown);
+    }, [cancelDraw]);
+
+    useEffect(() => {
+        if (shapeType !== "draw" || placeStart) return;
+        const state = drawStateRef.current;
+        if (state?.drawing) return;
+        const anchor = points.length ? points[points.length - 1] : startPose;
+        if (!anchor) return;
+        setPreview({x: anchor.x, y: anchor.y, h: anchor.h ?? startPose.h ?? 0});
+    }, [shapeType, placeStart, points, startPose, setPreview]);
 
     useEffect(() => {
         const canvas = canvasRef.current;
@@ -149,6 +174,7 @@ export default function CanvasStage({
             playState,
             playDist,
             waypoints,
+            drawTemp,
         });
 
         if (preview) {
@@ -189,6 +215,7 @@ export default function CanvasStage({
         playState,
         playDist,
         waypoints,
+        drawTemp,
     ]);
 
     return (
@@ -198,8 +225,15 @@ export default function CanvasStage({
                     ref={canvasRef}
                     width={canvasSize}
                     height={canvasSize}
-                    onMouseMove={handlers.onMouseMove}
-                    onMouseLeave={handlers.onMouseLeave}
+                    style={{
+                        cursor: shapeType === "draw" && !placeStart ? "none" : undefined,
+                        touchAction: "none",
+                    }}
+                    onPointerDown={handlers.onPointerDown}
+                    onPointerUp={handlers.onPointerUp}
+                    onPointerMove={handlers.onPointerMove}
+                    onPointerLeave={handlers.onPointerLeave}
+                    onPointerCancel={handlers.onPointerCancel}
                     onClick={handlers.onClick}
                 />
                 <canvas ref={overlayRef} className="overlay" width={canvasSize} height={canvasSize} />
