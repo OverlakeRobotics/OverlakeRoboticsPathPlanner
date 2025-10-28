@@ -171,11 +171,11 @@ export default function App() {
 
     const [shapeType, setShapeType] = useState("line");
     const [headingMode, setHeadingMode] = useState("straight");
-    const [endHeading, setEndHeading] = useState(0);
+    const [endHeading, setEndHeading] = useState(String(0));
 
-    const [velocity, setVelocity] = useState(DEFAULT_VELOCITY_IN_PER_S);
-    const [playSpeed, setPlaySpeed] = useState(DEFAULT_PLAYBACK_SPEED_IN_PER_S);
-    const [maxAccel, setMaxAccel] = useState(DEFAULT_MAX_ACCEL_IN_PER_S2);
+    const [velocity, setVelocity] = useState(String(DEFAULT_VELOCITY_IN_PER_S));
+    const [playSpeed, setPlaySpeed] = useState(String(DEFAULT_PLAYBACK_SPEED_IN_PER_S));
+    const [maxAccel, setMaxAccel] = useState(String(DEFAULT_MAX_ACCEL_IN_PER_S2));
     const [tolerance, setTolerance] = useState(String(DEFAULT_TOLERANCE_IN));
     const [snapInches, setSnapInches] = useState(String(DEFAULT_SNAP_IN));
 
@@ -529,9 +529,9 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                 setPoints(pts);
             }
             if (typeof data.headingMode === "string") setHeadingMode(data.headingMode);
-            if (Number.isFinite(Number(data.endHeading))) setEndHeading(Number(data.endHeading));
-            if (Number.isFinite(Number(data.velocity))) setVelocity(Number(data.velocity));
-            if (Number.isFinite(Number(data.maxAccel))) setMaxAccel(Number(data.maxAccel));
+            if (Number.isFinite(Number(data.endHeading))) setEndHeading(String(Number(data.endHeading)));
+            if (Number.isFinite(Number(data.velocity))) setVelocity(String(Number(data.velocity)));
+            if (Number.isFinite(Number(data.maxAccel))) setMaxAccel(String(Number(data.maxAccel)));
             if (Number.isFinite(Number(data.tolerance))) setTolerance(String(Number(data.tolerance)));
             if (Number.isFinite(Number(data.snapInches))) setSnapInches(String(Number(data.snapInches)));
             if (data.robot && typeof data.robot === "object") setRobotDimensions({...robotDimensions, ...data.robot});

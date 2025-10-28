@@ -193,13 +193,13 @@ export default function BuildPanel({
                     {openSections.motion && (
                         <div className="field-grid" id="motion-card">
                             <Field label="Velocity (in/s)">
-                                <input type="number" min={1} max={200} step={1} value={velocity} onChange={(event) => setVelocity(Number(event.target.value))} />
+                                <input type="number" min={1} max={200} step={1} value={velocity} onChange={(event) => setVelocity(event.target.value)} />
                             </Field>
                             <Field label="Max accel (in/s²)">
-                                <input type="number" min={1} max={400} step={1} value={maxAccel} onChange={(event) => setMaxAccel(Number(event.target.value))} />
+                                <input type="number" min={1} max={400} step={1} value={maxAccel} onChange={(event) => setMaxAccel(event.target.value)} />
                             </Field>
                             <Field label="Preview speed (in/s)">
-                                <input type="number" min={1} max={200} step={1} value={playSpeed} onChange={(event) => setPlaySpeed(Number(event.target.value))} />
+                                <input type="number" min={1} max={200} step={1} value={playSpeed} onChange={(event) => setPlaySpeed(event.target.value)} />
                             </Field>
                             <Field label="Tolerance (in)">
                                 <input type="number" min={0} step={0.1} value={tolerance} onChange={(event) => setTolerance(event.target.value)} />
@@ -255,10 +255,10 @@ export default function BuildPanel({
                                     />
                                 </Field>
                                 <Field label="Robot length (in)">
-                                    <input type="number" min={1} max={36} step={0.5} value={length} onChange={(event) => setRobotDimensions((prev) => ({...prev, length: Number(event.target.value)}))} />
+                                    <input type="number" min={1} max={36} step={0.5} value={length} onChange={(event) => setRobotDimensions((prev) => ({...prev, length: event.target.value}))} />
                                 </Field>
                                 <Field label="Robot width (in)">
-                                    <input type="number" min={1} max={36} step={0.5} value={width} onChange={(event) => setRobotDimensions((prev) => ({...prev, width: Number(event.target.value)}))} />
+                                    <input type="number" min={1} max={36} step={0.5} value={width} onChange={(event) => setRobotDimensions((prev) => ({...prev, width: event.target.value}))} />
                                 </Field>
                             </div>
                             <p className="helper-text">Length aligns with +X, width with +Y.</p>
