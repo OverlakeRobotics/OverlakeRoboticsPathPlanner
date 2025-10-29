@@ -1,0 +1,84 @@
+/* Robot chassis styles per point
+   Each .robot-chassis.point-N class provides a color and base dimensions
+   so the UI can render a small chassis overlay for each waypoint.
+
+   Usage (example):
+   <div class="robot-chassis point-3" style="left: 120px; top: 80px; transform: translate(-50%,-50%) rotate(45deg);"></div>
+*/
+
+:root {
+  --chassis-width: 46px;
+  --chassis-height: 28px;
+  --chassis-radius: 6px;
+  --chassis-border: 2px;
+  --chassis-shadow: 0 6px 14px rgba(2,6,23,0.45);
+  --chassis-accent-1: #60a5fa;
+}
+
+.robot-chassis {
+  position: absolute;
+  width: var(--chassis-width);
+  height: var(--chassis-height);
+  border-radius: var(--chassis-radius);
+  background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+  border: var(--chassis-border) solid rgba(255,255,255,0.06);
+  box-shadow: var(--chassis-shadow);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transform-origin: 50% 50%;
+  pointer-events: none; /* overlay only */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Central arrow / heading indicator inside chassis */
+.robot-chassis::after {
+  content: "";
+  display: block;
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-bottom: 12px solid var(--robot-accent, #60a5fa);
+  transform: translateY(-2px);
+}
+
+/* A subtle inner plate for contrast */
+.robot-chassis .plate {
+  position: absolute;
+  inset: 4px;
+  border-radius: calc(var(--chassis-radius) - 2px);
+  background: rgba(255,255,255,0.02);
+}
+
+/* Per-point accent colors (1..20). Use these classes to tint the arrow and border.
+   If you need more points, add additional classes following the same pattern. */
+.point-1  { --robot-accent: #60a5fa; border-color: rgba(96,165,250,0.18); }
+.point-2  { --robot-accent: #34d399; border-color: rgba(52,211,153,0.18); }
+.point-3  { --robot-accent: #f472b6; border-color: rgba(244,114,182,0.18); }
+.point-4  { --robot-accent: #fb923c; border-color: rgba(251,146,60,0.18); }
+.point-5  { --robot-accent: #f97316; border-color: rgba(249,115,22,0.18); }
+.point-6  { --robot-accent: #a78bfa; border-color: rgba(167,139,250,0.18); }
+.point-7  { --robot-accent: #34c3f4; border-color: rgba(52,195,244,0.18); }
+.point-8  { --robot-accent: #60a5fa; border-color: rgba(96,165,250,0.18); }
+.point-9  { --robot-accent: #06b6d4; border-color: rgba(6,182,212,0.18); }
+.point-10 { --robot-accent: #a3e635; border-color: rgba(163,230,53,0.18); }
+.point-11 { --robot-accent: #ef4444; border-color: rgba(239,68,68,0.18); }
+.point-12 { --robot-accent: #f59e0b; border-color: rgba(245,158,11,0.18); }
+.point-13 { --robot-accent: #7c3aed; border-color: rgba(124,58,237,0.18); }
+.point-14 { --robot-accent: #efaa00; border-color: rgba(239,170,0,0.18); }
+.point-15 { --robot-accent: #14b8a6; border-color: rgba(20,184,166,0.18); }
+.point-16 { --robot-accent: #0ea5a4; border-color: rgba(14,165,164,0.18); }
+.point-17 { --robot-accent: #8b5cf6; border-color: rgba(139,92,246,0.18); }
+.point-18 { --robot-accent: #06b6d4; border-color: rgba(6,182,212,0.18); }
+.point-19 { --robot-accent: #ec4899; border-color: rgba(236,72,153,0.18); }
+.point-20 { --robot-accent: #22c55e; border-color: rgba(34,197,94,0.18); }
+
+/* Responsive: shrink the chassis on small canvases */
+@media (max-width: 900px) {
+  :root {
+    --chassis-width: 36px;
+    --chassis-height: 22px;
+  }
+}

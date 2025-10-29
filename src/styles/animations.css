@@ -1,0 +1,584 @@
+/**
+ * Animation System - FTC Path Planner
+ * Smooth transitions and animations with accessibility support
+ */
+
+/* ============================================
+   TRANSITION DEFAULTS
+   ============================================ */
+
+/* Base transition for most interactive elements */
+.transition-base {
+  transition-property: background-color, border-color, color, fill, stroke, opacity, box-shadow, transform;
+  transition-duration: var(--transition-base);
+  transition-timing-function: var(--ease-in-out);
+}
+
+.transition-fast {
+  transition-duration: var(--transition-fast);
+}
+
+.transition-slow {
+  transition-duration: var(--transition-slow);
+}
+
+/* ============================================
+   BUTTON ANIMATIONS
+   ============================================ */
+
+/* Button press feedback - subtle transform on active */
+@keyframes button-press {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(1px) scale(0.98);
+  }
+  100% {
+    transform: translateY(1px) scale(0.98);
+  }
+}
+
+.btn-press-active {
+  animation: button-press var(--transition-fast) var(--ease-out) forwards;
+}
+
+/* Button hover lift effect */
+@keyframes button-hover-lift {
+  from {
+    transform: translateY(0);
+    box-shadow: var(--shadow-md);
+  }
+  to {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-lg);
+  }
+}
+
+/* ============================================
+   SUCCESS & STATUS ANIMATIONS
+   ============================================ */
+
+/* Success pulse - for successful operations */
+@keyframes success-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(76, 175, 80, 0);
+    transform: scale(1.02);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(76, 175, 80, 0);
+    transform: scale(1);
+  }
+}
+
+.success-pulse {
+  animation: success-pulse 0.6s var(--ease-out);
+}
+
+/* Loading pulse - for loading states */
+@keyframes loading-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.loading-pulse {
+  animation: loading-pulse 1.5s var(--ease-in-out) infinite;
+}
+
+/* Shimmer effect for loading placeholders */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 0%,
+    var(--surface-3) 50%,
+    var(--surface-2) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* ============================================
+   FADE ANIMATIONS
+   ============================================ */
+
+/* Fade in */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.fade-in {
+  animation: fade-in var(--transition-base) var(--ease-out);
+}
+
+.fade-in-slow {
+  animation: fade-in var(--transition-slow) var(--ease-out);
+}
+
+/* Fade out */
+@keyframes fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.fade-out {
+  animation: fade-out var(--transition-base) var(--ease-in);
+}
+
+/* Fade in with slight upward movement */
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in-up {
+  animation: fade-in-up var(--transition-base) var(--ease-out);
+}
+
+/* Fade in with slight downward movement */
+@keyframes fade-in-down {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in-down {
+  animation: fade-in-down var(--transition-base) var(--ease-out);
+}
+
+/* ============================================
+   SCALE ANIMATIONS
+   ============================================ */
+
+/* Scale in */
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.scale-in {
+  animation: scale-in var(--transition-base) var(--ease-out);
+}
+
+/* Scale out */
+@keyframes scale-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+}
+
+.scale-out {
+  animation: scale-out var(--transition-base) var(--ease-in);
+}
+
+/* Pop in - bouncy scale effect */
+@keyframes pop-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.pop-in {
+  animation: pop-in var(--transition-base) var(--ease-bounce);
+}
+
+/* ============================================
+   SLIDE ANIMATIONS
+   ============================================ */
+
+/* Slide in from right */
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.slide-in-right {
+  animation: slide-in-right var(--transition-base) var(--ease-out);
+}
+
+/* Slide in from left */
+@keyframes slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.slide-in-left {
+  animation: slide-in-left var(--transition-base) var(--ease-out);
+}
+
+/* Slide out to right */
+@keyframes slide-out-right {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+}
+
+.slide-out-right {
+  animation: slide-out-right var(--transition-base) var(--ease-in);
+}
+
+/* ============================================
+   ROTATE ANIMATIONS
+   ============================================ */
+
+/* Spin - continuous rotation */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+.spin-slow {
+  animation: spin 2s linear infinite;
+}
+
+/* Rotate in */
+@keyframes rotate-in {
+  from {
+    opacity: 0;
+    transform: rotate(-10deg) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(0deg) scale(1);
+  }
+}
+
+.rotate-in {
+  animation: rotate-in var(--transition-base) var(--ease-out);
+}
+
+/* ============================================
+   INTERACTIVE HOVER EFFECTS
+   ============================================ */
+
+/* Smooth color transition for hover states */
+.hover-lift {
+  transition: transform var(--transition-base) var(--ease-out),
+              box-shadow var(--transition-base) var(--ease-out);
+}
+
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+
+/* Brightness increase on hover */
+.hover-brighten {
+  transition: filter var(--transition-base) var(--ease-out);
+}
+
+.hover-brighten:hover {
+  filter: brightness(1.1);
+}
+
+/* Scale slightly on hover */
+.hover-scale {
+  transition: transform var(--transition-base) var(--ease-out);
+}
+
+.hover-scale:hover {
+  transform: scale(1.02);
+}
+
+/* ============================================
+   FOCUS INDICATORS
+   ============================================ */
+
+/* Animated focus ring */
+@keyframes focus-ring {
+  0% {
+    box-shadow: 0 0 0 0 var(--state-focus-ring);
+  }
+  100% {
+    box-shadow: 0 0 0 3px var(--state-focus-ring);
+  }
+}
+
+.focus-ring-animated:focus-visible {
+  animation: focus-ring var(--transition-fast) var(--ease-out) forwards;
+  outline: none;
+}
+
+/* ============================================
+   COLLAPSE/EXPAND ANIMATIONS
+   ============================================ */
+
+/* Smooth height transition for collapsible content */
+.collapse-enter {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height var(--transition-slow) var(--ease-out),
+              opacity var(--transition-base) var(--ease-out);
+}
+
+.collapse-enter-active {
+  max-height: 2000px;
+  opacity: 1;
+}
+
+.collapse-exit {
+  max-height: 2000px;
+  opacity: 1;
+  overflow: hidden;
+  transition: max-height var(--transition-slow) var(--ease-in),
+              opacity var(--transition-base) var(--ease-in);
+}
+
+.collapse-exit-active {
+  max-height: 0;
+  opacity: 0;
+}
+
+/* ============================================
+   PROGRESS & ACTIVITY INDICATORS
+   ============================================ */
+
+/* Indeterminate progress bar animation */
+@keyframes progress-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
+.progress-indeterminate::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 25%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--color-primary),
+    transparent
+  );
+  animation: progress-indeterminate 1.5s ease-in-out infinite;
+}
+
+/* Dot pulse - for activity indicators */
+@keyframes dot-pulse {
+  0%, 80%, 100% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.dot-pulse {
+  animation: dot-pulse 1.4s ease-in-out infinite;
+}
+
+.dot-pulse:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.dot-pulse:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+/* ============================================
+   ACCESSIBILITY - REDUCED MOTION
+   ============================================ */
+
+/* Respect user's motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  
+  /* Still allow opacity transitions for accessibility */
+  .fade-in,
+  .fade-out,
+  .fade-in-up,
+  .fade-in-down {
+    animation: fade-in 0.01ms;
+  }
+}
+/* ============================================
+   POINT EDITOR ANIMATIONS
+   ============================================ */
+
+/* Point selection glow effect */
+@keyframes point-glow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(96, 165, 250, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(96, 165, 250, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(96, 165, 250, 0);
+  }
+}
+
+.point-glow {
+  animation: point-glow 1.5s ease-out infinite;
+}
+
+/* Popover slide-in animation */
+@keyframes popover-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.popover-slide-in {
+  animation: popover-slide-in var(--transition-base) var(--ease-out);
+}
+
+/* Hover preview fade-in */
+@keyframes hover-preview-fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.hover-preview-fade-in {
+  animation: hover-preview-fade-in 0.2s var(--ease-out);
+}
+
+/* Pulse ring for drag operations */
+@keyframes pulse-ring {
+  0% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+
+.pulse-ring {
+  animation: pulse-ring 1s ease-out infinite;
+}
+
+
+/* ============================================
+   UTILITY CLASSES
+   ============================================ */
+
+/* Disable animations */
+.no-animation {
+  animation: none !important;
+  transition: none !important;
+}
+
+/* Smooth all transitions */
+.transition-all {
+  transition: all var(--transition-base) var(--ease-in-out);
+}
+
+/* Transform GPU acceleration hint */
+.gpu-accelerated {
+  will-change: transform;
+  transform: translateZ(0);
+}
+
+/* Remove will-change after animation */
+.gpu-accelerated-done {
+  will-change: auto;
+}

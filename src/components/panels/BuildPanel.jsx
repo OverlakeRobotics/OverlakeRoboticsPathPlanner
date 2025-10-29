@@ -1,5 +1,6 @@
 import {useState} from "react";
-
+import PointEditorPopover from "../PointEditorPopover";
+ 
 export default function BuildPanel({
                                        shapeType,
                                        setShapeType,
@@ -37,16 +38,33 @@ export default function BuildPanel({
                                        setTagValue,
                                        addTag,
                                        pointsLength,
+                                       editorOpen, // disables per-point controls when inline editor is active
+                                       points, // array of waypoints
+                                       setPoints, // for reordering
+                                       onPointSelect, // callback to jump to point on canvas
+                                       selectedPointIndex, // currently selected point
                                    }) {
     const {length, width} = robotDimensions;
     const [openSections, setOpenSections] = useState({
         segment: true,
         heading: true,
-        start: false,
+        start: true,
+        points: true, // New section for point list
         motion: false,
         overlay: false,
         tags: false,
     });
+    const [pointEditor, setPointEditor] = useState({open: false, index: null, position: null});
+
+    const updatePoint = (index, patch) => {
+        if (typeof setPoints === "function") {
+            setPoints((prev) => {
+                const next = [...prev];
+                next[index] = { ...(next[index] ?? {}), ...patch };
+                return next;
+            });
+        }
+    };
 
     const toggleSection = (key) => {
         setOpenSections((prev) => ({...prev, [key]: !prev[key]}));
@@ -83,10 +101,34 @@ export default function BuildPanel({
                     </div>
                     {openSections.segment && (
                         <div className="button-group" id="segment-card">
-                            <SegmentButton label="Line" active={shapeType === "line"} onClick={() => setShapeType("line")} />
-                            <SegmentButton label="Draw" active={shapeType === "draw"} onClick={() => setShapeType("draw")} />
-                            <SegmentButton label="Bézier Curve" active={shapeType === "bezier"} onClick={() => setShapeType("bezier")} />
-                            <SegmentButton label="Circular Arc" active={shapeType === "arc"} onClick={() => setShapeType("arc")} />
+                            <SegmentButton
+                                label="Line"
+                                icon="━"
+                                shortcut="L"
+                                active={shapeType === "line"}
+                                onClick={() => setShapeType("line")}
+                            />
+                            <SegmentButton
+                                label="Draw"
+                                icon="✏"
+                                shortcut="D"
+                                active={shapeType === "draw"}
+                                onClick={() => setShapeType("draw")}
+                            />
+                            <SegmentButton
+                                label="Bézier"
+                                icon="∿"
+                                shortcut="B"
+                                active={shapeType === "bezier"}
+                                onClick={() => setShapeType("bezier")}
+                            />
+                            <SegmentButton
+                                label="Arc"
+                                icon="⌢"
+                                shortcut="A"
+                                active={shapeType === "arc"}
+                                onClick={() => setShapeType("arc")}
+                            />
                         </div>
                     )}
                 </section>
@@ -109,26 +151,40 @@ export default function BuildPanel({
                     </div>
                     {openSections.heading && (
                         <div className="button-group compact" id="heading-card">
-                            <SegmentButton label="Straight" active={headingMode === "straight"} onClick={() => setHeadingMode("straight")} />
                             <SegmentButton label="Tangent" active={headingMode === "tangent"} onClick={() => setHeadingMode("tangent")} />
+                            <SegmentButton label="Straight" active={headingMode === "straight"} onClick={() => setHeadingMode("straight")} />
+                            <SegmentButton label="Manual" active={headingMode === "manual"} onClick={() => setHeadingMode("manual")} />
                             <SegmentButton label="Orthogonal L" active={headingMode === "orth-left"} onClick={() => setHeadingMode("orth-left")} />
                             <SegmentButton label="Orthogonal R" active={headingMode === "orth-right"} onClick={() => setHeadingMode("orth-right")} />
                             {headingMode === "straight" && (
                                 <div className="field">
-                                    <label>Desired end heading (°)</label>
-                                    <input
-                                        type="text"
-                                        value={String(endHeading)}
-                                        onChange={(event) => {
-                                            const value = event.target.value;
-                                            if (value === "" || value === "-") {
-                                                setEndHeading(value);
-                                                return;
-                                            }
-                                            const parsed = parseFloat(value);
-                                            if (!Number.isNaN(parsed)) setEndHeading(parsed);
-                                        }}
-                                    />
+                                    <label>Desired end heading</label>
+                                    <div style={{position: 'relative'}}>
+                                        <input
+                                            type="number"
+                                            step="1"
+                                            value={String(endHeading)}
+                                            onChange={(event) => {
+                                                const value = event.target.value;
+                                                if (value === "" || value === "-") {
+                                                    setEndHeading(value);
+                                                    return;
+                                                }
+                                                const parsed = parseFloat(value);
+                                                if (!Number.isNaN(parsed)) setEndHeading(parsed);
+                                            }}
+                                            style={{paddingRight: '28px'}}
+                                        />
+                                        <span style={{
+                                            position: 'absolute',
+                                            right: '8px',
+                                            top: '50%',
+                                            transform: 'translateY(-50%)',
+                                            color: 'var(--text-secondary)',
+                                            fontSize: '0.875rem',
+                                            pointerEvents: 'none'
+                                        }}>°</span>
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -152,27 +208,60 @@ export default function BuildPanel({
                         <span className="collapse-caret">{openSections.start ? "▾" : "▸"}</span>
                     </div>
                     {openSections.start && (
-                        <div className="field-grid three" id="start-card">
-                            <Field label="X (in)">
-                                <input type="text" value={String(startPose.x)} onChange={(event) => handlePoseChange(event.target.value, "x", setStartPose)} />
-                            </Field>
-                            <Field label="Y (in)">
-                                <input type="text" value={String(startPose.y)} onChange={(event) => handlePoseChange(event.target.value, "y", setStartPose)} />
-                            </Field>
-                            <Field label="Heading (°)">
-                                <input type="text" value={String(startPose.h)} onChange={(event) => handlePoseChange(event.target.value, "h", setStartPose)} />
-                            </Field>
+                        <div id="start-card" style={{padding: 'var(--spacing-sm) 0'}}>
+                            <div className="field-grid three">
+                                <Field label="X" unit="in">
+                                    <input
+                                        type="number"
+                                        step="0.5"
+                                        value={String(startPose.x)}
+                                        onChange={(event) => handlePoseChange(event.target.value, "x", setStartPose)}
+                                    />
+                                </Field>
+                                <Field label="Y" unit="in">
+                                    <input
+                                        type="number"
+                                        step="0.5"
+                                        value={String(startPose.y)}
+                                        onChange={(event) => handlePoseChange(event.target.value, "y", setStartPose)}
+                                    />
+                                </Field>
+                                <Field label="Heading" unit="°">
+                                    <input
+                                        type="number"
+                                        step="1"
+                                        value={String(startPose.h)}
+                                        onChange={(event) => handlePoseChange(event.target.value, "h", setStartPose)}
+                                    />
+                                </Field>
+                            </div>
+                            <div className="card-actions" style={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: 'var(--spacing-sm)',
+                                marginTop: 'var(--spacing-md)',
+                                paddingTop: 'var(--spacing-md)',
+                                borderTop: '1px solid var(--color-border-secondary, hsl(210 14% 23%))'
+                            }}>
+                                <button
+                                    className={`btn callout ${placeStart ? "callout-active" : ""}`}
+                                    onClick={togglePlaceStart}
+                                >
+                                    {placeStart ? "📍 Click on field to set start" : "Place start on field"}
+                                </button>
+                                <button
+                                    className="btn callout secondary"
+                                    onClick={useLivePose}
+                                    disabled={!livePoseAvailable}
+                                >
+                                    Use live robot pose
+                                </button>
+                            </div>
                         </div>
                     )}
-                    <div className="card-actions">
-                        <button className={`btn callout ${placeStart ? "callout-active" : ""}`} onClick={togglePlaceStart}>
-                            {placeStart ? "Click on field to set start" : "Place start on field"}
-                        </button>
-                        <button className="btn callout secondary" onClick={useLivePose} disabled={!livePoseAvailable}>
-                            Use live robot pose
-                        </button>
-                    </div>
                 </section>
+
+                {/* Waypoints list moved to RunPanel (Manage Path dropdown) */}
 
                 <section className="control-card">
                     <div
@@ -192,20 +281,53 @@ export default function BuildPanel({
                     </div>
                     {openSections.motion && (
                         <div className="field-grid" id="motion-card">
-                            <Field label="Velocity (in/s)">
-                                <input type="number" min={1} max={200} step={1} value={velocity} onChange={(event) => setVelocity(event.target.value)} />
+                            <Field label="Velocity" unit="in/s">
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={200}
+                                    step={5}
+                                    value={velocity}
+                                    onChange={(event) => setVelocity(event.target.value)}
+                                />
                             </Field>
-                            <Field label="Max accel (in/s²)">
-                                <input type="number" min={1} max={400} step={1} value={maxAccel} onChange={(event) => setMaxAccel(event.target.value)} />
+                            <Field label="Max accel" unit="in/s²">
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={400}
+                                    step={10}
+                                    value={maxAccel}
+                                    onChange={(event) => setMaxAccel(event.target.value)}
+                                />
                             </Field>
-                            <Field label="Preview speed (in/s)">
-                                <input type="number" min={1} max={200} step={1} value={playSpeed} onChange={(event) => setPlaySpeed(event.target.value)} />
+                            <Field label="Preview speed" unit="in/s">
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={200}
+                                    step={5}
+                                    value={playSpeed}
+                                    onChange={(event) => setPlaySpeed(event.target.value)}
+                                />
                             </Field>
-                            <Field label="Tolerance (in)">
-                                <input type="number" min={0} step={0.1} value={tolerance} onChange={(event) => setTolerance(event.target.value)} />
+                            <Field label="Tolerance" unit="in">
+                                <input
+                                    type="number"
+                                    min={0}
+                                    step={0.5}
+                                    value={tolerance}
+                                    onChange={(event) => setTolerance(event.target.value)}
+                                />
                             </Field>
-                            <Field label="Snap (in)">
-                                <input type="number" min={0} step={0.1} value={snapInches} onChange={(event) => setSnapInches(event.target.value)} />
+                            <Field label="Snap" unit="in">
+                                <input
+                                    type="number"
+                                    min={0}
+                                    step={0.5}
+                                    value={snapInches}
+                                    onChange={(event) => setSnapInches(event.target.value)}
+                                />
                             </Field>
                         </div>
                     )}
@@ -236,7 +358,7 @@ export default function BuildPanel({
                                         <option value="on">Visible</option>
                                     </select>
                                 </Field>
-                                <Field label="Grid step (in)">
+                                <Field label="Grid step" unit="in">
                                     <input
                                         type="number"
                                         min={0.25}
@@ -251,14 +373,28 @@ export default function BuildPanel({
                                             }
                                         }}
                                         disabled={!showGrid}
-                                        style={showGrid ? undefined : {opacity: 0.55}}
+                                        style={{opacity: showGrid ? 1 : 0.4, cursor: showGrid ? 'text' : 'not-allowed'}}
                                     />
                                 </Field>
-                                <Field label="Robot length (in)">
-                                    <input type="number" min={1} max={36} step={0.5} value={length} onChange={(event) => setRobotDimensions((prev) => ({...prev, length: event.target.value}))} />
+                                <Field label="Robot length" unit="in">
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        max={36}
+                                        step={0.5}
+                                        value={length}
+                                        onChange={(event) => setRobotDimensions((prev) => ({...prev, length: event.target.value}))}
+                                    />
                                 </Field>
-                                <Field label="Robot width (in)">
-                                    <input type="number" min={1} max={36} step={0.5} value={width} onChange={(event) => setRobotDimensions((prev) => ({...prev, width: event.target.value}))} />
+                                <Field label="Robot width" unit="in">
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        max={36}
+                                        step={0.5}
+                                        value={width}
+                                        onChange={(event) => setRobotDimensions((prev) => ({...prev, width: event.target.value}))}
+                                    />
                                 </Field>
                             </div>
                             <p className="helper-text">Length aligns with +X, width with +Y.</p>
@@ -266,57 +402,57 @@ export default function BuildPanel({
                     )}
                 </section>
 
-                <section className="control-card">
-                    <div
-                        className="card-header collapsible"
-                        role="button"
-                        tabIndex={0}
-                        aria-expanded={openSections.tags}
-                        aria-controls="tags-card"
-                        onClick={() => toggleSection("tags")}
-                        onKeyDown={(event) => handleToggleKey(event, "tags")}
-                    >
-                        <div>
-                            <h3>Tags</h3>
-                            <p>Attach metadata to match automation routines.</p>
-                        </div>
-                        <span className="collapse-caret">{openSections.tags ? "▾" : "▸"}</span>
-                    </div>
-                    {openSections.tags && (
-                        <>
-                            <div className="field-grid" id="tags-card">
-                                <Field label="Name">
-                                    <input type="text" placeholder="e.g., intakeOn" value={tagName} onChange={(event) => setTagName(event.target.value)} />
-                                </Field>
-                                <Field label="Value">
-                                    <input type="number" step={1} placeholder="0" value={tagValue} onChange={(event) => setTagValue(event.target.value)} />
-                                </Field>
-                            </div>
-                            <div className="card-actions">
-                                <button className="btn pill" onClick={addTag} disabled={pointsLength === 0 || !tagName.trim()}>
-                                    Add tag to latest point
-                                </button>
-                            </div>
-                        </>
-                    )}
-                </section>
+                {/* Tags section removed per user request */}
             </div>
         </aside>
     );
 }
 
-const SegmentButton = ({label, active, onClick}) => (
-    <button className={`btn pill ${active ? "pill-active" : ""}`} onClick={onClick}>
-        {label}
+const SegmentButton = ({label, icon, shortcut, active, onClick}) => (
+    <button
+        className={`btn pill ${active ? "pill-active" : ""}`}
+        onClick={onClick}
+        aria-label={`${label} tool (shortcut: ${shortcut})`}
+        title={`${label} (${shortcut})`}
+        style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 'var(--spacing-xs)',
+            fontSize: '0.9375rem',
+            padding: 'var(--spacing-sm) var(--spacing-md)',
+            minHeight: '40px'
+        }}
+    >
+        <span style={{fontSize: '1.125rem', lineHeight: 1}}>{icon}</span>
+        <span>{label}</span>
+        <kbd style={{
+            fontSize: '0.75rem',
+            opacity: 0.7,
+            fontFamily: 'monospace',
+            marginLeft: 'var(--spacing-xs)',
+            padding: '2px 4px',
+            borderRadius: '3px',
+            background: 'rgba(0,0,0,0.1)'
+        }}>{shortcut}</kbd>
     </button>
 );
 
-const Field = ({label, children}) => (
+const Field = ({label, unit, children}) => (
     <div className="field">
-        <label>{label}</label>
+        <label>
+            {label}
+            {unit && <span style={{
+                marginLeft: 'var(--spacing-xs)',
+                color: 'var(--text-secondary)',
+                fontSize: '0.875rem',
+                fontWeight: 'normal'
+            }}>({unit})</span>}
+        </label>
         {children}
     </div>
 );
+
 
 function handlePoseChange(value, key, setPose) {
     if (value === "" || value === "-") {

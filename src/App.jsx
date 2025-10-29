@@ -5,6 +5,9 @@ import "./App.css";
 import CanvasStage from "./components/CanvasStage";
 import BuildPanel from "./components/panels/BuildPanel";
 import RunPanel from "./components/panels/RunPanel";
+import KeyboardShortcutsHelp from "./components/KeyboardShortcutsHelp";
+import { DEFAULT_KEYBINDS } from './constants/keybinds';
+import {useKeyboardShortcuts} from "./hooks/useKeyboardShortcuts";
 import {
     DEFAULT_CANVAS_SIZE,
     DEFAULT_MAX_ACCEL_IN_PER_S2,
@@ -169,6 +172,12 @@ export default function App() {
     const [tagName, setTagName] = useState("");
     const [tagValue, setTagValue] = useState(0);
 
+    // Inline point editor state (opened after placing a point)
+    const [inlineEditor, setInlineEditor] = useState(null);
+    
+    // Selected point index for the point list panel
+    const [selectedPointIndex, setSelectedPointIndex] = useState(null);
+    
     const [shapeType, setShapeType] = useState("line");
     const [headingMode, setHeadingMode] = useState("straight");
     const [endHeading, setEndHeading] = useState(String(0));
@@ -189,6 +198,7 @@ export default function App() {
     const [bezierTemp, setBezierTemp] = useState(null);
     const [arcTemp, setArcTemp] = useState(null);
     const [drawTemp, setDrawTemp] = useState(null);
+    const [placePointIndex, setPlacePointIndex] = useState(null);
 
     const [copied, setCopied] = useState(false);
     const [uploadStatus, setUploadStatus] = useState("idle");
@@ -196,6 +206,22 @@ export default function App() {
     const uploadTimerRef = useRef(null);
     const runTimerRef = useRef(null);
     const undoRef = useRef(() => {});
+
+    const [showHelp, setShowHelp] = useState(false);
+    // showHelpSettings controls whether the Help modal opens on the Settings tab
+    const [showHelpSettings, setShowHelpSettings] = useState(false);
+    const [keybinds, setKeybinds] = useState(() => {
+        const saved = localStorage.getItem('keybinds');
+        try {
+            return saved ? JSON.parse(saved) : DEFAULT_KEYBINDS;
+        } catch (e) {
+            return DEFAULT_KEYBINDS;
+        }
+    });
+    const [scrollSensitivity, setScrollSensitivity] = useState(() => {
+        const saved = localStorage.getItem('scrollSensitivity');
+        return saved ? Number(saved) : 5;
+    });
 
     const {livePose, robotState} = usePosePolling();
 
@@ -363,18 +389,85 @@ export default function App() {
 
     useEffect(() => { undoRef.current = undoLast; }, [undoLast]);
 
-    useEffect(() => {
-        const handleKeyDown = (event) => {
-            const isMac = navigator.platform.toLowerCase().includes("mac");
-            const modifier = isMac ? event.metaKey : event.ctrlKey;
-            if (modifier && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "z") {
-                event.preventDefault();
-                undoRef.current();
+    // Keyboard shortcuts
+    const {isMac} = useKeyboardShortcuts({
+        // Drawing mode shortcuts
+        [keybinds.line]: () => {
+            setShapeType('line');
+            setBezierTemp(null);
+            setArcTemp(null);
+            setDrawTemp(null);
+            setPreview(null);
+        },
+        [keybinds.bezier]: () => {
+            setShapeType('bezier');
+            setBezierTemp(null);
+            setArcTemp(null);
+            setDrawTemp(null);
+            setPreview(null);
+        },
+        [keybinds.arc]: () => {
+            setShapeType('arc');
+            setBezierTemp(null);
+            setArcTemp(null);
+            setDrawTemp(null);
+            setPreview(null);
+        },
+        [keybinds.draw]: () => {
+            setShapeType('draw');
+            setBezierTemp(null);
+            setArcTemp(null);
+            setDrawTemp(null);
+            setPreview(null);
+        },
+        // View shortcuts
+        [keybinds.toggleGrid]: () => setShowGrid(prev => !prev),
+        // Action shortcuts
+        [keybinds.toggleStart]: () => togglePlaceStart(),
+        [keybinds.playPause]: (e) => {
+            e.preventDefault();
+            handleTogglePlay();
+        },
+        [keybinds.delete]: () => {
+            if (points.length > 0) {
+                undoLast();
             }
-        };
-        window.addEventListener("keydown", handleKeyDown);
-        return () => window.removeEventListener("keydown", handleKeyDown);
-    }, []);
+        },
+        'backspace': () => {
+            if (points.length > 0) {
+                undoLast();
+            }
+        },
+        // Undo/Redo shortcuts
+        [keybinds.undo]: (e) => {
+            e.preventDefault();
+            undoLast();
+        },
+        [keybinds.redo]: (e) => {
+            e.preventDefault();
+            // Redo functionality would go here if implemented
+        },
+        'ctrl+y': (e) => {
+            e.preventDefault();
+            // Redo functionality would go here if implemented
+        },
+        // Help shortcuts
+        [keybinds.help]: () => setShowHelp(true),
+        'f1': (e) => {
+            e.preventDefault();
+            setShowHelp(true);
+        },
+        'escape': () => {
+            if (showHelp) {
+                // if help is open with settings tab active, close settings first
+                if (showHelpSettings) setShowHelpSettings(false);
+                else setShowHelp(false);
+            }
+        },
+    }, true, {
+        preventDefault: false, // We handle preventDefault per-shortcut
+        ignoreInputFields: true,
+    });
 
     const addTag = () => {
         if (points.length === 0) return;
@@ -404,13 +497,14 @@ export default function App() {
     const doUpload = () => {
         if (uploadTimerRef.current) clearTimeout(uploadTimerRef.current);
         setUploadStatus("sending");
+        const serial = buildSerializable();
         const payload = {
             version: 1,
             start: [num(startPose.x), num(startPose.y), num(startPose.h)],
             points: points.map((p) => [Number(p.x), Number(p.y), Number(p.h ?? 0)]),
             velocity: Number(velocity) || 0,
             tolerance: Number(tolerance) || 0,
-            tags: tags.map((tag) => ({index: Number(tag.index) || 0, name: String(tag.name || ""), value: Number(tag.value) || 0})),
+            tags: (serial.tags || []).map((tag) => ({index: Number(tag.index) || 0, name: String(tag.name || ""), value: Number(tag.value) || 0})),
         };
         fetch(HUB_POINTS_URL, {
             method: "POST",
@@ -457,9 +551,25 @@ export default function App() {
                 .map((p) => ({x: toFixed(p.x), y: toFixed(p.y), h: toFixed(num(p.h ?? 0))}))
                 .map((p) => `    new Pose2D(DistanceUnit.INCH, ${p.x}, ${p.y}, AngleUnit.DEGREES, ${p.h})`),
         ].join(",\n");
-        const tagsBlock = tags
+
+        // Collect tags defined on points (p.tags) and merge with top-level tags
+        const tagsFromPoints = points.flatMap((p, i) => {
+            if (!Array.isArray(p.tags)) return [];
+            return p.tags.map((t) => {
+                const name = t.id ?? t.name ?? String(t.label ?? t);
+                const value = Number(t.params?.value ?? t.value ?? 0) || 0;
+                return { name, value, index: i };
+            });
+        });
+
+        const mergedTags = [...tagsFromPoints, ...tags.map((t) => ({ index: Number(t.index) || 0, name: String(t.name || ""), value: Number(t.value) || 0 }))];
+        // Sort tags by index so generated code lists them in path order
+        mergedTags.sort((a, b) => (a.index || 0) - (b.index || 0) || String(a.name || "").localeCompare(String(b.name || "")));
+
+        const tagsBlock = mergedTags
             .map((tag) => `    new Tag("${(tag.name ?? "").replace(/"/g, '\\"')}", ${Number(tag.value) || 0}, ${Number(tag.index) || 0})`)
             .join(",\n");
+
         return `// ---- PATH ----
 public static Pose2D[] path = new Pose2D[] {
 ${poseLines}
@@ -480,20 +590,33 @@ public static double MAX_ACCEL_IN_S2 = ${toFixed(Number(maxAccel) || 0, 2)};
 public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
     }, [points, startPose, tags, velocity, maxAccel, tolerance]);
 
-    const buildSerializable = () => ({
-        version: 1,
-        createdAt: new Date().toISOString(),
-        start: {x: num(startPose.x), y: num(startPose.y), h: num(startPose.h)},
-        points: points.map((p) => ({x: Number(p.x), y: Number(p.y), h: Number(p.h ?? 0)})),
-        headingMode,
-        endHeading: endHeadingValue,
-        velocity: Number(velocity) || 0,
-        maxAccel: Number(maxAccel) || 0,
-        tolerance: Number(tolerance) || 0,
-        snapInches: Number(snapInches) || 0,
-        robot: {...robotDimensions},
-        tags: tags.map((t) => ({...t, index: Number(t.index) || 0, value: Number(t.value) || 0, name: String(t.name || "")})),
-    });
+    const buildSerializable = () => {
+        const tagsFromPoints = points.flatMap((p, i) => {
+            if (!Array.isArray(p.tags)) return [];
+            return p.tags.map((t) => {
+                const name = t.id ?? t.name ?? String(t.label ?? t);
+                const value = Number(t.params?.value ?? t.value ?? 0) || 0;
+                return { index: i, name, value };
+            });
+        });
+    const mergedTags = [...tagsFromPoints, ...tags.map((t) => ({ index: Number(t.index) || 0, name: String(t.name || ""), value: Number(t.value) || 0 }))];
+    mergedTags.sort((a, b) => (a.index || 0) - (b.index || 0) || String(a.name || "").localeCompare(String(b.name || "")));
+
+    return {
+            version: 1,
+            createdAt: new Date().toISOString(),
+            start: {x: num(startPose.x), y: num(startPose.y), h: num(startPose.h)},
+            points: points.map((p) => ({x: Number(p.x), y: Number(p.y), h: Number(p.h ?? 0), tags: p.tags})),
+            headingMode,
+            endHeading: endHeadingValue,
+            velocity: Number(velocity) || 0,
+            maxAccel: Number(maxAccel) || 0,
+            tolerance: Number(tolerance) || 0,
+            snapInches: Number(snapInches) || 0,
+            robot: {...robotDimensions},
+            tags: mergedTags,
+        };
+    };
 
     const onExportPath = () => {
         const obj = buildSerializable();
@@ -522,10 +645,15 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                 }
             }
             if (Array.isArray(data.points)) {
-                const pts = data.points.map((p) =>
-                    Array.isArray(p) ? {x: getNum(p[0]), y: getNum(p[1]), h: normDeg(getNum(p[2]))} :
-                        {x: getNum(p.x), y: getNum(p.y), h: normDeg(getNum(p.h))}
-                );
+                const pts = data.points.map((p) => {
+                    if (Array.isArray(p)) return {x: getNum(p[0]), y: getNum(p[1]), h: normDeg(getNum(p[2]))};
+                    // object form may include tags
+                    const base = {x: getNum(p.x), y: getNum(p.y), h: normDeg(getNum(p.h))};
+                    if (Array.isArray(p.tags)) {
+                        return {...base, tags: p.tags};
+                    }
+                    return base;
+                });
                 setPoints(pts);
             }
             if (typeof data.headingMode === "string") setHeadingMode(data.headingMode);
@@ -609,6 +737,14 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                 setTagValue={setTagValue}
                 addTag={addTag}
                 pointsLength={points.length}
+                editorOpen={Boolean(inlineEditor)}
+                points={points}
+                setPoints={setPoints}
+                onPointSelect={(index) => {
+                    setSelectedPointIndex(index);
+                    // Optionally scroll/focus the point on canvas
+                }}
+                selectedPointIndex={selectedPointIndex}
             />
 
             {!isNarrow && (
@@ -652,6 +788,15 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                     playDist={playDist}
                     waypoints={waypoints}
                     previewMarker="dotArrow"
+                    onEditorOpen={(open) => {
+                        setInlineEditor(open);
+                        if (!open) setSelectedPointIndex(null);
+                    }}
+                    selectedPointIndex={selectedPointIndex}
+                    onPointSelect={(index) => setSelectedPointIndex(index)}
+                    placePointIndex={placePointIndex}
+                    setPlacePointIndex={setPlacePointIndex}
+                    scrollSensitivity={scrollSensitivity}
                 />
             </div>
 
@@ -684,9 +829,41 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                 onClear={clearAll}
                 tags={tags}
                 onRemoveTag={removeTag}
+                onUpdateTag={(index, updated) => setTags(prev => prev.map((t,i) => i===index ? {...t, ...updated} : t))}
+                onAddTag={(t) => setTags(prev => [...prev, t])}
                 estTimeSec={estRunTimeSeconds}
                 onExportPath={onExportPath}
                 onImportFile={onImportPath}
+                points={points}
+                setPoints={setPoints}
+                selectedPointIndex={selectedPointIndex}
+                onPointSelect={(i) => setSelectedPointIndex(i)}
+                setPlacePointIndex={setPlacePointIndex}
+            />
+
+            {/* Settings button */}
+            <button
+                className="settings-button-fab"
+                onClick={() => { setShowHelp(true); setShowHelpSettings(true); }}
+                aria-label="Open settings"
+                title="Settings"
+            >
+                ⚙️
+            </button>
+
+            {/* Keyboard shortcuts help overlay */}
+            <KeyboardShortcutsHelp
+                isOpen={showHelp}
+                onClose={() => { setShowHelp(false); setShowHelpSettings(false); }}
+                isMac={isMac}
+                keybinds={keybinds}
+                onKeybindsChange={(newKeybinds) => {
+                    setKeybinds(newKeybinds);
+                    localStorage.setItem('keybinds', JSON.stringify(newKeybinds));
+                }}
+                scrollSensitivity={scrollSensitivity}
+                onScrollSensitivityChange={(s) => { setScrollSensitivity(s); localStorage.setItem('scrollSensitivity', String(s)); }}
+                defaultShowSettings={showHelpSettings}
             />
         </div>
     );
