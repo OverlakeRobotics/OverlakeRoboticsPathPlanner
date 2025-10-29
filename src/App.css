@@ -10,6 +10,7 @@
   --warn: #ffd166;
   --danger: #ff6b6b;
   --shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+  --scale-factor: 0.8;
   color-scheme: dark;
 }
 
@@ -32,8 +33,15 @@ body {
     linear-gradient(var(--bg), var(--bg)) fixed;
 }
 
+.app-scale {
+  transform: scale(var(--scale-factor));
+  transform-origin: top left;
+  width: calc(100% / var(--scale-factor));
+  height: calc(100% / var(--scale-factor));
+}
+
 .app-shell {
-  height: 100vh;
+  height: calc(100vh / var(--scale-factor));
   display: grid;
   grid-template-columns: var(--left-panel, 380px) 10px minmax(720px, 1fr) 10px var(--right-panel, 420px);
   gap: 16px;
@@ -259,11 +267,56 @@ textarea.code-box {
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: grab;
+  transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
+}
+
+.tag-pill:active {
+  cursor: grabbing;
+}
+
+.tag-pill.dragging {
+  opacity: 0.5;
+  transform: scale(0.95);
+}
+
+.tag-pill:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.tag-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.drag-handle {
+  color: var(--muted);
+  font-size: 14px;
+  cursor: grab;
+  user-select: none;
+  line-height: 1;
+}
+
+.tag-pill:active .drag-handle {
+  cursor: grabbing;
+}
+
+.tag-name {
+  font-weight: 600;
+  flex: 1;
 }
 
 .tag-pill .btn {
   align-self: start;
   width: fit-content;
+}
+
+.tag-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .tag-meta {
@@ -537,4 +590,131 @@ textarea.code-box::-webkit-scrollbar-thumb:hover {
 .btn.callout:disabled {
   opacity: 0.55;
   box-shadow: none;
+}
+
+/* Modal styles */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+  backdrop-filter: blur(4px);
+}
+
+.modal-content {
+  background: var(--card);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  max-width: 500px;
+  width: 100%;
+  max-height: 90vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-header {
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 0.3px;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 32px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.modal-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
+.modal-body {
+  padding: 20px 24px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.modal-footer {
+  padding: 16px 24px 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.field-hint {
+  color: var(--muted);
+  font-weight: normal;
+  font-size: 11px;
+}
+
+.tag-template-info {
+  background: rgba(92, 210, 255, 0.08);
+  border: 1px solid rgba(92, 210, 255, 0.2);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.tag-template-info strong {
+  color: var(--accent);
+  display: block;
+  margin-bottom: 4px;
+}
+
+.tag-template-info p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.added-tags-list {
+  background: rgba(107, 230, 117, 0.08);
+  border: 1px solid rgba(107, 230, 117, 0.2);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.added-tags-list strong {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--ok);
+  font-size: 13px;
+}
+
+.added-tag-item {
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+  margin-top: 6px;
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  color: var(--text);
 }

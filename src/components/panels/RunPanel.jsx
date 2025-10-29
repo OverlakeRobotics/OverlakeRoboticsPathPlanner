@@ -35,6 +35,8 @@ export default function RunPanel({
                                      onClear,
                                      tags,
                                      onRemoveTag,
+                                     onEditTag,
+                                     onReorderTags,
                                      // NEW:
                                      estTimeSec,
                                      onExportPath,
@@ -45,6 +47,11 @@ export default function RunPanel({
     const progress = totalLength > 0 ? Math.round((playDist / totalLength) * 100) : 0;
 
     const fileInputRef = useRef(null);
+    const [editingIndex, setEditingIndex] = useState(null);
+    const [editName, setEditName] = useState("");
+    const [editValue, setEditValue] = useState(0);
+    const [editPointIndex, setEditPointIndex] = useState(0);
+    const [draggedIndex, setDraggedIndex] = useState(null);
 
     return (
         <aside className="panel panel-run">
@@ -134,6 +141,121 @@ export default function RunPanel({
                     </div>
                 </section>
 
+                {!!tags.length && (
+                    <section className="control-card">
+                        <div className="card-header">
+                            <h3>Tags</h3>
+                            <p>Drag to reorder, click Edit to modify.</p>
+                        </div>
+                        <div className="tag-list">
+                            {tags.map((tag, index) => {
+                                const isEditing = editingIndex === index;
+
+                                return (
+                                    <div
+                                        key={`${tag.name}-${index}`}
+                                        className={`tag-pill ${draggedIndex === index ? 'dragging' : ''}`}
+                                        draggable={!isEditing}
+                                        onDragStart={(e) => {
+                                            setDraggedIndex(index);
+                                            e.dataTransfer.effectAllowed = 'move';
+                                        }}
+                                        onDragOver={(e) => {
+                                            e.preventDefault();
+                                            e.dataTransfer.dropEffect = 'move';
+                                        }}
+                                        onDrop={(e) => {
+                                            e.preventDefault();
+                                            if (draggedIndex !== null && draggedIndex !== index && onReorderTags) {
+                                                onReorderTags(draggedIndex, index);
+                                            }
+                                            setDraggedIndex(null);
+                                        }}
+                                        onDragEnd={() => setDraggedIndex(null)}
+                                    >
+                                        {isEditing ? (
+                                            <>
+                                                <div className="field">
+                                                    <label>Name</label>
+                                                    <input
+                                                        type="text"
+                                                        value={editName}
+                                                        onChange={(e) => setEditName(e.target.value)}
+                                                        autoFocus
+                                                    />
+                                                </div>
+                                                <div className="field">
+                                                    <label>Value</label>
+                                                    <input
+                                                        type="number"
+                                                        value={editValue}
+                                                        onChange={(e) => setEditValue(Number(e.target.value))}
+                                                    />
+                                                </div>
+                                                <div className="field">
+                                                    <label>Point Index</label>
+                                                    <input
+                                                        type="number"
+                                                        min="0"
+                                                        max={pointsCount}
+                                                        value={editPointIndex}
+                                                        onChange={(e) => setEditPointIndex(Number(e.target.value))}
+                                                    />
+                                                </div>
+                                                <div className="tag-actions">
+                                                    <button
+                                                        className="btn primary"
+                                                        onClick={() => {
+                                                            if (editName.trim() && onEditTag) {
+                                                                onEditTag(index, editName.trim(), editValue, editPointIndex);
+                                                            }
+                                                            setEditingIndex(null);
+                                                        }}
+                                                    >
+                                                        Save
+                                                    </button>
+                                                    <button
+                                                        className="btn ghost"
+                                                        onClick={() => setEditingIndex(null)}
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                </div>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <div className="tag-header">
+                                                    <span className="drag-handle" title="Drag to reorder">⋮⋮</span>
+                                                    <span className="tag-name">{tag.name}</span>
+                                                </div>
+                                                <span className="tag-meta">value {tag.value} • point {tag.index}</span>
+                                                <div className="tag-actions">
+                                                    <button
+                                                        className="btn ghost"
+                                                        onClick={() => {
+                                                            setEditingIndex(index);
+                                                            setEditName(tag.name);
+                                                            setEditValue(tag.value);
+                                                            setEditPointIndex(tag.index);
+                                                        }}
+                                                    >
+                                                        Edit
+                                                    </button>
+                                                    {onRemoveTag && (
+                                                        <button className="btn danger" onClick={() => onRemoveTag(index)}>
+                                                            Delete
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </section>
+                )}
+
                 <section className="control-card">
                     <div className="card-header">
                         <h3>Generated Code</h3>
@@ -141,34 +263,12 @@ export default function RunPanel({
                     </div>
                     <textarea className="code-box" readOnly value={code} />
                 </section>
-
-                {!!tags.length && (
-                    <section className="control-card">
-                        <div className="card-header">
-                            <h3>Tags</h3>
-                            <p>Attached to the most recent placement.</p>
-                        </div>
-                        <div className="tag-list">
-                            {tags.map((tag, index) => (
-                                <div key={`${tag.name}-${index}`} className="tag-pill">
-                                    <span>{tag.name}</span>
-                                    <span className="tag-meta">value {tag.value} • point {tag.index}</span>
-                                    {onRemoveTag && (
-                                        <button className="btn ghost" onClick={() => onRemoveTag(index)}>
-                                            Remove
-                                        </button>
-                                    )}
-                                </div>
-                            ))}
-                        </div>
-                    </section>
-                )}
             </div>
         </aside>
     );
 }
 
-import {useRef} from "react";
+import {useRef, useState} from "react";
 
 const Stat = ({label, value}) => (
     <div className="stat-card">

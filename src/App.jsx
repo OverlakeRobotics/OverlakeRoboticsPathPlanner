@@ -5,6 +5,7 @@ import "./App.css";
 import CanvasStage from "./components/CanvasStage";
 import BuildPanel from "./components/panels/BuildPanel";
 import RunPanel from "./components/panels/RunPanel";
+import TagModal from "./components/TagModal";
 import {
     DEFAULT_CANVAS_SIZE,
     DEFAULT_MAX_ACCEL_IN_PER_S2,
@@ -162,12 +163,35 @@ export default function App() {
     const [startPose, setStartPose] = useState({x: 0, y: 0, h: 0});
     const [placeStart, setPlaceStart] = useState(false);
 
-    const [points, setPoints] = useState([]);
+    const [points, setPointsInternal] = useState([]);
     const [undoStack, setUndoStack] = useState([]);
+    const [shouldShowTagModal, setShouldShowTagModal] = useState(true);
+
+    const setPoints = useCallback((updater) => {
+        setPointsInternal((prev) => {
+            const next = typeof updater === 'function' ? updater(prev) : updater;
+            // Check if points were added (one at a time, not bulk operations)
+            if (shouldShowTagModal && next.length === prev.length + 1) {
+                // Show modal for the last added point
+                setPendingTagPointIndex(next.length);
+                setShowTagModal(true);
+            }
+            return next;
+        });
+    }, [shouldShowTagModal]);
+
+    const setPointsWithoutModal = useCallback((updater) => {
+        setShouldShowTagModal(false);
+        setPointsInternal(updater);
+        // Re-enable modal after a short delay
+        setTimeout(() => setShouldShowTagModal(true), 100);
+    }, []);
 
     const [tags, setTags] = useState([]);
     const [tagName, setTagName] = useState("");
     const [tagValue, setTagValue] = useState(0);
+    const [showTagModal, setShowTagModal] = useState(false);
+    const [pendingTagPointIndex, setPendingTagPointIndex] = useState(null);
 
     const [shapeType, setShapeType] = useState("line");
     const [headingMode, setHeadingMode] = useState("straight");
@@ -386,7 +410,28 @@ export default function App() {
         setTagValue(0);
     };
 
+    const addTagFromModal = (name, value, pointIndex) => {
+        setTags((prev) => [...prev, {index: pointIndex, name, value}]);
+    };
+
     const removeTag = (index) => setTags((prev) => prev.filter((_, i) => i !== index));
+
+    const editTag = (index, name, value, pointIndex) => {
+        setTags((prev) => {
+            const updated = [...prev];
+            updated[index] = { name, value, index: pointIndex };
+            return updated;
+        });
+    };
+
+    const reorderTags = (fromIndex, toIndex) => {
+        setTags((prev) => {
+            const updated = [...prev];
+            const [movedTag] = updated.splice(fromIndex, 1);
+            updated.splice(toIndex, 0, movedTag);
+            return updated;
+        });
+    };
 
     const triggerCopiedFeedback = () => {
         setCopied(true);
@@ -526,7 +571,7 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                     Array.isArray(p) ? {x: getNum(p[0]), y: getNum(p[1]), h: normDeg(getNum(p[2]))} :
                         {x: getNum(p.x), y: getNum(p.y), h: normDeg(getNum(p.h))}
                 );
-                setPoints(pts);
+                setPointsWithoutModal(pts);
             }
             if (typeof data.headingMode === "string") setHeadingMode(data.headingMode);
             if (Number.isFinite(Number(data.endHeading))) setEndHeading(String(Number(data.endHeading)));
@@ -566,6 +611,14 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
     const estRunTimeSeconds = runProfile.totalTime;
 
     return (
+        <div className="app-scale">
+        <TagModal
+            isOpen={showTagModal}
+            onClose={() => setShowTagModal(false)}
+            onAddTag={addTagFromModal}
+            pointIndex={pendingTagPointIndex}
+            pointsCount={points.length}
+        />
         <div className="app-shell" ref={layoutRef} style={shellStyle}>
             <BuildPanel
                 shapeType={shapeType}
@@ -684,10 +737,13 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                 onClear={clearAll}
                 tags={tags}
                 onRemoveTag={removeTag}
+                onEditTag={editTag}
+                onReorderTags={reorderTags}
                 estTimeSec={estRunTimeSeconds}
                 onExportPath={onExportPath}
                 onImportFile={onImportPath}
             />
+        </div>
         </div>
     );
 }

@@ -285,8 +285,35 @@ export default function BuildPanel({
                     {openSections.tags && (
                         <>
                             <div className="field-grid" id="tags-card">
-                                <Field label="Name">
-                                    <input type="text" placeholder="e.g., intakeOn" value={tagName} onChange={(event) => setTagName(event.target.value)} />
+                                <Field label="Tag Type">
+                                    <select value={tagName} onChange={(event) => {
+                                        const selectedName = event.target.value;
+                                        setTagName(selectedName);
+                                        // Set default values based on tag type
+                                        const defaults = {
+                                            velocity: 50,
+                                            pause: 1000,
+                                            intake: 0,
+                                            autoAimRed: 0,
+                                            autoAimBlue: 0,
+                                            shooterVelocity: 0,
+                                            hoodAngle: 0,
+                                            launchArtifacts: 1000,
+                                        };
+                                        if (defaults[selectedName] !== undefined) {
+                                            setTagValue(defaults[selectedName]);
+                                        }
+                                    }}>
+                                        <option value="">-- Custom --</option>
+                                        <option value="velocity">velocity - Change robot velocity (in/s)</option>
+                                        <option value="pause">pause - Pause at point (ms)</option>
+                                        <option value="intake">intake - Control intake motor</option>
+                                        <option value="autoAimRed">autoAimRed - Auto-aim for red alliance</option>
+                                        <option value="autoAimBlue">autoAimBlue - Auto-aim for blue alliance</option>
+                                        <option value="shooterVelocity">shooterVelocity - Set shooter velocity</option>
+                                        <option value="hoodAngle">hoodAngle - Set hood angle (degrees)</option>
+                                        <option value="launchArtifacts">launchArtifacts - Launch/shoot (ms)</option>
+                                    </select>
                                 </Field>
                                 <Field label="Value">
                                     <input type="number" step={1} placeholder="0" value={tagValue} onChange={(event) => setTagValue(event.target.value)} />
