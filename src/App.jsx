@@ -167,6 +167,10 @@ export default function App() {
     const [undoStack, setUndoStack] = useState([]);
     const [shouldShowTagModal, setShouldShowTagModal] = useState(true);
 
+    // Point editing state
+    const [selectedPointIndex, setSelectedPointIndex] = useState(null);
+    const [editMode, setEditMode] = useState(false); // When true, enable point editing
+
     const setPoints = useCallback((updater) => {
         setPointsInternal((prev) => {
             const next = typeof updater === 'function' ? updater(prev) : updater;
@@ -433,6 +437,32 @@ export default function App() {
         });
     };
 
+    // Point editing functions
+    const updatePoint = (index, updates) => {
+        setPoints((prev) => {
+            const updated = [...prev];
+            updated[index] = {...updated[index], ...updates};
+            return updated;
+        });
+    };
+
+    const deletePoint = (index) => {
+        setPoints((prev) => prev.filter((_, i) => i !== index));
+        setSelectedPointIndex(null);
+        // Update tags that reference points after the deleted one
+        setTags((prev) => prev
+            .filter(tag => tag.index !== index + 1) // Remove tags for deleted point
+            .map(tag => tag.index > index + 1 ? {...tag, index: tag.index - 1} : tag)
+        );
+    };
+
+    const toggleEditMode = () => {
+        setEditMode(prev => !prev);
+        if (editMode) {
+            setSelectedPointIndex(null);
+        }
+    };
+
     const triggerCopiedFeedback = () => {
         setCopied(true);
         window.setTimeout(() => setCopied(false), 1600);
@@ -662,6 +692,12 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                 setTagValue={setTagValue}
                 addTag={addTag}
                 pointsLength={points.length}
+                editMode={editMode}
+                toggleEditMode={toggleEditMode}
+                selectedPointIndex={selectedPointIndex}
+                updatePoint={updatePoint}
+                deletePoint={deletePoint}
+                points={points}
             />
 
             {!isNarrow && (
@@ -705,6 +741,10 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                     playDist={playDist}
                     waypoints={waypoints}
                     previewMarker="dotArrow"
+                    editMode={editMode}
+                    selectedPointIndex={selectedPointIndex}
+                    setSelectedPointIndex={setSelectedPointIndex}
+                    updatePoint={updatePoint}
                 />
             </div>
 

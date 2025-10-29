@@ -37,6 +37,12 @@ export default function BuildPanel({
                                        setTagValue,
                                        addTag,
                                        pointsLength,
+                                       editMode,
+                                       toggleEditMode,
+                                       selectedPointIndex,
+                                       updatePoint,
+                                       deletePoint,
+                                       points,
                                    }) {
     const {length, width} = robotDimensions;
     const [openSections, setOpenSections] = useState({
@@ -65,6 +71,62 @@ export default function BuildPanel({
                 <h2>Planner Controls</h2>
             </div>
             <div className="panel-body scroll-area">
+                {/* Edit Mode Section */}
+                <section className="control-card">
+                    <div className="card-header">
+                        <div>
+                            <h3>Edit Mode</h3>
+                            <p>Enable to select and modify existing points.</p>
+                        </div>
+                    </div>
+                    <button
+                        className={`btn ${editMode ? "primary" : "ghost"}`}
+                        onClick={toggleEditMode}
+                    >
+                        {editMode ? "✓ Edit Mode Active" : "Enable Edit Mode"}
+                    </button>
+                    {editMode && selectedPointIndex !== null && (
+                        <div className="field-grid">
+                            <div className="field">
+                                <label>Point #{selectedPointIndex + 1} - X (in)</label>
+                                <input
+                                    type="number"
+                                    step="0.1"
+                                    value={points[selectedPointIndex]?.x || 0}
+                                    onChange={(e) => updatePoint(selectedPointIndex, { x: parseFloat(e.target.value) || 0 })}
+                                />
+                            </div>
+                            <div className="field">
+                                <label>Y (in)</label>
+                                <input
+                                    type="number"
+                                    step="0.1"
+                                    value={points[selectedPointIndex]?.y || 0}
+                                    onChange={(e) => updatePoint(selectedPointIndex, { y: parseFloat(e.target.value) || 0 })}
+                                />
+                            </div>
+                            <div className="field">
+                                <label>Heading (°)</label>
+                                <input
+                                    type="number"
+                                    step="1"
+                                    value={points[selectedPointIndex]?.h || 0}
+                                    onChange={(e) => updatePoint(selectedPointIndex, { h: parseFloat(e.target.value) || 0 })}
+                                />
+                            </div>
+                            <button
+                                className="btn danger"
+                                onClick={() => deletePoint(selectedPointIndex)}
+                            >
+                                Delete Point
+                            </button>
+                        </div>
+                    )}
+                    {editMode && selectedPointIndex === null && pointsLength > 0 && (
+                        <p className="helper-text">Click on a point in the canvas to select and edit it.</p>
+                    )}
+                </section>
+
                 <section className="control-card">
                     <div
                         className="card-header collapsible"

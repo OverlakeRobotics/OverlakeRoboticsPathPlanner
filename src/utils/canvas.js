@@ -60,6 +60,8 @@ export const drawPlannerScene = ({
     playDist,
     waypoints,
     drawTemp,
+    selectedPointIndex,
+    editMode,
 }) => {
     if (!canvasCtx || !overlayCtx) return;
 
@@ -81,7 +83,7 @@ export const drawPlannerScene = ({
 
     overlayCtx.clearRect(0, 0, canvasSize, canvasSize);
     drawStartMarker(overlayCtx, startPose, center, ppi, placeStart, robot);
-    drawWaypoints(overlayCtx, points, center, ppi, robot);
+    drawWaypoints(overlayCtx, points, center, ppi, robot, selectedPointIndex, editMode);
     drawPreview(overlayCtx, {
         preview,
         startPose,
@@ -177,17 +179,31 @@ const drawMarker = (ctx, cx, cy, color, heading) => {
     ctx.restore();
 };
 
-const drawWaypoints = (ctx, points, center, ppi, robot) => {
+const drawWaypoints = (ctx, points, center, ppi, robot, selectedPointIndex, editMode) => {
     ctx.save();
     points.forEach((point, index) => {
         const heading = num(point.h ?? 0);
         const {cx, cy} = worldToCanvas(point.x, point.y, center.x, center.y, ppi);
-        ctx.fillStyle = index === points.length - 1 ? LAST_POINT_COLOR : WAYPOINT_COLOR;
+
+        // Highlight selected point in edit mode
+        const isSelected = editMode && selectedPointIndex === index;
+
+        if (isSelected) {
+            // Draw selection ring
+            ctx.strokeStyle = "#5cd2ff";
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(cx, cy, 12, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        ctx.fillStyle = isSelected ? "#5cd2ff" : (index === points.length - 1 ? LAST_POINT_COLOR : WAYPOINT_COLOR);
         ctx.beginPath();
-        ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+        ctx.arc(cx, cy, isSelected ? 7 : 5, 0, Math.PI * 2);
         ctx.fill();
+
         const arrow = headingVector(heading, 18);
-        drawArrow(ctx, cx, cy, cx + arrow.dx, cy + arrow.dy, FOOTPRINT_FILL);
+        drawArrow(ctx, cx, cy, cx + arrow.dx, cy + arrow.dy, isSelected ? "#5cd2ff" : FOOTPRINT_FILL);
     });
     if (points.length) {
         const last = points[points.length - 1];
@@ -641,6 +657,11 @@ export const createCanvasInteraction = ({
     setPreview,
     drawStateRef,
     setDrawTemp,
+    editMode,
+    points,
+    selectedPointIndex,
+    setSelectedPointIndex,
+    updatePoint,
 }) => {
     const pointerToWorld = (clientX, clientY, rect) => {
         const cx = (clientX - rect.left) * (canvasSize / rect.width);
@@ -660,6 +681,8 @@ export const createCanvasInteraction = ({
                 cursorWorld: null,
                 pointerId: null,
                 pointerTarget: null,
+                dragging: false,
+                dragPointIndex: null,
             };
         }
         if (!drawStateRef.current.raw) drawStateRef.current.raw = [];
@@ -670,6 +693,8 @@ export const createCanvasInteraction = ({
         if (!drawStateRef.current.cursorWorld) drawStateRef.current.cursorWorld = null;
         if (typeof drawStateRef.current.pointerId !== "number") drawStateRef.current.pointerId = null;
         if (!drawStateRef.current.pointerTarget) drawStateRef.current.pointerTarget = null;
+        if (typeof drawStateRef.current.dragging !== "boolean") drawStateRef.current.dragging = false;
+        if (typeof drawStateRef.current.dragPointIndex !== "number") drawStateRef.current.dragPointIndex = null;
         return drawStateRef.current;
     };
 
@@ -721,18 +746,22 @@ export const createCanvasInteraction = ({
         if (state?.drawing) return null;
         const world = pointerToWorld(clientX, clientY, rect);
         const snapped = snapToField(world.x, world.y, snapStep());
-        if (placeStart) {
-            const heading = num(startPose.h);
-            setPreview({x: snapped.x, y: snapped.y, h: heading});
-        } else if (shapeType !== "draw") {
-            const heading = computeHeading(snapped.x, snapped.y);
-            setPreview({x: snapped.x, y: snapped.y, h: heading});
-        } else {
-            const anchor = appendPoints.getAnchor();
-            if (anchor) setPreview({x: anchor.x, y: anchor.y, h: num(anchor.h ?? startPose.h)});
-            else setPreview(null);
+
+        // Don't show preview in edit mode
+        if (!editMode) {
+            if (placeStart) {
+                const heading = num(startPose.h);
+                setPreview({x: snapped.x, y: snapped.y, h: heading});
+            } else if (shapeType !== "draw") {
+                const heading = computeHeading(snapped.x, snapped.y);
+                setPreview({x: snapped.x, y: snapped.y, h: heading});
+            } else {
+                const anchor = appendPoints.getAnchor();
+                if (anchor) setPreview({x: anchor.x, y: anchor.y, h: num(anchor.h ?? startPose.h)});
+                else setPreview(null);
+            }
         }
-        return {snapped};
+        return {snapped, world};
     };
 
     const appendDrawPoint = (state, clientX, clientY, rect, force = false) => {
@@ -896,6 +925,40 @@ export const createCanvasInteraction = ({
     };
 
     const onPointerDown = (event) => {
+        // Check for point dragging in edit mode
+        if (editMode && points && updatePoint) {
+            const rect = event.currentTarget.getBoundingClientRect();
+            const world = pointerToWorld(event.clientX, event.clientY, rect);
+            const clickRadius = 15 / ppi;
+
+            let closestIndex = -1;
+            let closestDist = Infinity;
+            points.forEach((point, index) => {
+                const dx = point.x - world.x;
+                const dy = point.y - world.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < clickRadius && dist < closestDist) {
+                    closestDist = dist;
+                    closestIndex = index;
+                }
+            });
+
+            if (closestIndex >= 0) {
+                const state = ensureDrawState();
+                state.dragging = true;
+                state.dragPointIndex = closestIndex;
+                setSelectedPointIndex(closestIndex);
+                if (typeof event.pointerId === "number") {
+                    try {
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                        state.pointerId = event.pointerId;
+                        state.pointerTarget = event.currentTarget;
+                    } catch (e) {}
+                }
+                return;
+            }
+        }
+
         if (beginDraw(event)) return;
         if (shapeType === "draw") setPreview(null);
     };
@@ -903,6 +966,16 @@ export const createCanvasInteraction = ({
     const onPointerMove = (event) => {
         const rect = event.currentTarget.getBoundingClientRect();
         const state = drawStateRef?.current;
+
+        // Handle point dragging in edit mode
+        if (state?.dragging && state.dragPointIndex !== null && updatePoint) {
+            const result = handlePointer(event.clientX, event.clientY, rect);
+            if (result) {
+                updatePoint(state.dragPointIndex, { x: result.snapped.x, y: result.snapped.y });
+            }
+            return;
+        }
+
         if (state?.drawing) {
             const appended = appendDrawPoint(state, event.clientX, event.clientY, rect, false);
             if (appended || state.cursorWorld) updateDrawTemp(state);
@@ -914,6 +987,22 @@ export const createCanvasInteraction = ({
     const onPointerUp = (event) => {
         const rect = event.currentTarget.getBoundingClientRect();
         const state = drawStateRef?.current;
+
+        // Stop dragging in edit mode
+        if (state?.dragging) {
+            state.dragging = false;
+            state.dragPointIndex = null;
+            if (state.pointerId !== null && state.pointerTarget) {
+                try {
+                    state.pointerTarget.releasePointerCapture(state.pointerId);
+                } catch (e) {}
+            }
+            state.pointerId = null;
+            state.pointerTarget = null;
+            state.ignoreClick = true; // Prevent onClick from firing after drag
+            return;
+        }
+
         if (state?.drawing) {
             if (state.hasMovement) {
                 appendDrawPoint(state, event.clientX, event.clientY, rect, true);
@@ -965,7 +1054,33 @@ export const createCanvasInteraction = ({
         const rect = event.currentTarget.getBoundingClientRect();
         const result = handlePointer(event.clientX, event.clientY, rect);
         if (!result) return;
-        const {snapped} = result;
+        const {snapped, world} = result;
+
+        // Edit mode: select point
+        if (editMode && points && setSelectedPointIndex) {
+            const clickRadius = 15 / ppi; // 15 pixels in inches
+            let closestIndex = -1;
+            let closestDist = Infinity;
+
+            points.forEach((point, index) => {
+                const dx = point.x - world.x;
+                const dy = point.y - world.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < clickRadius && dist < closestDist) {
+                    closestDist = dist;
+                    closestIndex = index;
+                }
+            });
+
+            if (closestIndex >= 0) {
+                setSelectedPointIndex(closestIndex);
+                return;
+            } else {
+                setSelectedPointIndex(null);
+                return;
+            }
+        }
+
         if (placeStart) {
             setStartPose((prev) => ({...prev, x: snapped.x, y: snapped.y}));
             setPlaceStart(false);

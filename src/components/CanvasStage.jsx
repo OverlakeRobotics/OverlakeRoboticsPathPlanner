@@ -40,6 +40,10 @@ export default function CanvasStage({
                                         playState,
                                         playDist,
                                         waypoints,
+                                        editMode,
+                                        selectedPointIndex,
+                                        setSelectedPointIndex,
+                                        updatePoint,
                                     }) {
     const canvasRef = useRef(null);
     const overlayRef = useRef(null);
@@ -102,6 +106,11 @@ export default function CanvasStage({
                 setPreview,
                 drawStateRef,
                 setDrawTemp,
+                editMode,
+                points,
+                selectedPointIndex,
+                setSelectedPointIndex,
+                updatePoint,
             }),
         [
             canvasSize,
@@ -121,6 +130,11 @@ export default function CanvasStage({
             arcTemp,
             setPreview,
             setDrawTemp,
+            editMode,
+            points,
+            selectedPointIndex,
+            setSelectedPointIndex,
+            updatePoint,
         ],
     );
 
@@ -135,13 +149,20 @@ export default function CanvasStage({
     }, [cancelDraw]);
 
     useEffect(() => {
-        if (shapeType !== "draw" || placeStart) return;
+        if (editMode || shapeType !== "draw" || placeStart) return;
         const state = drawStateRef.current;
         if (state?.drawing) return;
         const anchor = points.length ? points[points.length - 1] : startPose;
         if (!anchor) return;
         setPreview({x: anchor.x, y: anchor.y, h: anchor.h ?? startPose.h ?? 0});
-    }, [shapeType, placeStart, points, startPose, setPreview]);
+    }, [shapeType, placeStart, points, startPose, setPreview, editMode]);
+
+    // Clear preview when entering edit mode
+    useEffect(() => {
+        if (editMode) {
+            setPreview(null);
+        }
+    }, [editMode, setPreview]);
 
     useEffect(() => {
         const canvas = canvasRef.current;
@@ -175,6 +196,8 @@ export default function CanvasStage({
             playDist,
             waypoints,
             drawTemp,
+            selectedPointIndex,
+            editMode,
         });
 
         if (preview) {
