@@ -18,6 +18,8 @@ import {
 } from "../constants/config";
 import {headingVector, perpendicularHeading} from "./geometry";
 import {canvasToWorld, headingFromDelta, rotateLocalToWorld, snapToField, worldToCanvas} from "./geometry";
+
+export {canvasToWorld};
 import {getSegmentProgress, polylineLength, sampleCircularArcThrough, sampleQuadraticBezier} from "./path";
 import {computeDrawCandidates} from "./drawFit";
 import {clamp, num, normDeg, shortestDeltaDeg} from "./math";
@@ -60,6 +62,10 @@ export const drawPlannerScene = ({
     playDist,
     waypoints,
     drawTemp,
+    hoveredPoint,
+    isSnapping,
+    snapInches,
+    selectedPointIndex, // NEW: for highlighting selected point from list
 }) => {
     if (!canvasCtx || !overlayCtx) return;
 
@@ -77,11 +83,16 @@ export const drawPlannerScene = ({
     }
 
     if (showGrid && gridStep > 0) drawGrid(canvasCtx, gridStep, center, ppi, canvasSize);
-    drawPath(canvasCtx, startPose, points, center, ppi);
+    drawPath(canvasCtx, startPose, points, center, ppi, shapeType);
 
     overlayCtx.clearRect(0, 0, canvasSize, canvasSize);
-    drawStartMarker(overlayCtx, startPose, center, ppi, placeStart, robot);
-    drawWaypoints(overlayCtx, points, center, ppi, robot);
+    
+    if (isSnapping && preview && snapInches > 0) {
+        drawSnapIndicator(overlayCtx, preview, center, ppi);
+    }
+    
+    drawStartMarker(overlayCtx, startPose, center, ppi, placeStart, robot, hoveredPoint);
+    drawWaypoints(overlayCtx, points, center, ppi, robot, hoveredPoint, selectedPointIndex);
     drawPreview(overlayCtx, {
         preview,
         startPose,
@@ -132,69 +143,188 @@ const drawGrid = (ctx, step, center, ppi, canvasSize) => {
     ctx.restore();
 };
 
-const drawPath = (ctx, startPose, points, center, ppi) => {
+const drawPath = (ctx, startPose, points, center, ppi, shapeType) => {
     if (!points.length) return;
     ctx.save();
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
+    
+    // Enhanced path with gradient and shadow
+    ctx.shadowBlur = 4;
+    ctx.shadowColor = "rgba(0, 0, 0, 0.3)";
     ctx.strokeStyle = PATH_COLOR;
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 4;
+    
     const start = worldToCanvas(num(startPose.x), num(startPose.y), center.x, center.y, ppi);
     ctx.beginPath();
     ctx.moveTo(start.cx, start.cy);
-    points.forEach((p) => {
+    
+    points.forEach((p, index) => {
         const c = worldToCanvas(p.x, p.y, center.x, center.y, ppi);
         ctx.lineTo(c.cx, c.cy);
     });
+    
     ctx.stroke();
     ctx.restore();
 };
 
-const drawStartMarker = (ctx, startPose, center, ppi, placingStart, robot) => {
+const drawSnapIndicator = (ctx, preview, center, ppi) => {
+    const {cx, cy} = worldToCanvas(preview.x, preview.y, center.x, center.y, ppi);
+    ctx.save();
+    
+    // Pulsing animation
+    const time = Date.now() / 1000;
+    const pulse = 0.3 * Math.sin(time * 4) + 0.7;
+    
+    // Draw crosshair
+    ctx.strokeStyle = `rgba(34, 211, 238, ${pulse})`;
+    ctx.lineWidth = 2;
+    const size = 8;
+    
+    ctx.beginPath();
+    ctx.moveTo(cx - size, cy);
+    ctx.lineTo(cx + size, cy);
+    ctx.moveTo(cx, cy - size);
+    ctx.lineTo(cx, cy + size);
+    ctx.stroke();
+    
+    // Draw circle
+    ctx.beginPath();
+    ctx.arc(cx, cy, 10, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(34, 211, 238, ${pulse * 0.6})`;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    
+    ctx.restore();
+};
+
+const drawStartMarker = (ctx, startPose, center, ppi, placingStart, robot, hoveredPoint) => {
     if (placingStart) return;
     const sx = num(startPose.x);
     const sy = num(startPose.y);
     const sh = normDeg(num(startPose.h));
+    const isHovered = hoveredPoint?.type === 'start';
+    
     drawFootprint(ctx, sx, sy, sh, robot.length, robot.width, {
         fill: START_COLOR,
         stroke: "#ffc14b",
-        alpha: 0.12,
+        alpha: isHovered ? 0.2 : 0.03,
     }, center, ppi);
     const {cx, cy} = worldToCanvas(sx, sy, center.x, center.y, ppi);
-    drawMarker(ctx, cx, cy, START_COLOR, sh);
+    drawMarker(ctx, cx, cy, START_COLOR, sh, isHovered);
 };
 
-const drawMarker = (ctx, cx, cy, color, heading) => {
+const drawMarker = (ctx, cx, cy, color, heading, isHovered = false) => {
     ctx.save();
+    
+    const radius = isHovered ? 8 : 6;
+    
+    if (isHovered) {
+        // Glow effect on hover
+        ctx.shadowBlur = 12;
+        ctx.shadowColor = color;
+    }
+    
     ctx.fillStyle = color;
     ctx.strokeStyle = color;
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
     ctx.fill();
-    const arrow = headingVector(heading, 20);
+    
+    if (isHovered) {
+        // Additional ring on hover
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius + 4, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+    
+    const arrowLen = isHovered ? 24 : 20;
+    const arrow = headingVector(heading, arrowLen);
     drawArrow(ctx, cx, cy, cx + arrow.dx, cy + arrow.dy, color);
     ctx.restore();
 };
 
-const drawWaypoints = (ctx, points, center, ppi, robot) => {
+const drawWaypoints = (ctx, points, center, ppi, robot, hoveredPoint, selectedPointIndex) => {
     ctx.save();
     points.forEach((point, index) => {
         const heading = num(point.h ?? 0);
         const {cx, cy} = worldToCanvas(point.x, point.y, center.x, center.y, ppi);
-        ctx.fillStyle = index === points.length - 1 ? LAST_POINT_COLOR : WAYPOINT_COLOR;
+        const isHovered = hoveredPoint?.type === 'waypoint' && hoveredPoint?.index === index;
+        const isSelected = selectedPointIndex === index;
+        const isLast = index === points.length - 1;
+        
+        const radius = isHovered ? 7 : isSelected ? 6 : 5;
+        
+        if (isHovered || isSelected) {
+            // Shadow for depth on hover/selection
+            ctx.shadowBlur = isSelected ? 8 : 10;
+            ctx.shadowColor = isSelected ? "rgba(96, 165, 250, 0.6)" : "rgba(0, 0, 0, 0.4)";
+        }
+        
+        // Selection ring (drawn before the point)
+        if (isSelected && !isHovered) {
+            ctx.save();
+            ctx.shadowBlur = 0;
+            ctx.strokeStyle = "#60a5fa";
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius + 5, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+        }
+        
+        ctx.fillStyle = isSelected ? "#60a5fa" : (isLast ? LAST_POINT_COLOR : WAYPOINT_COLOR);
         ctx.beginPath();
-        ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
         ctx.fill();
-        const arrow = headingVector(heading, 18);
+        
+        if (isHovered) {
+            ctx.shadowBlur = 0;
+            // Tooltip-like indicator
+            ctx.fillStyle = "rgba(15, 23, 42, 0.95)";
+            ctx.strokeStyle = WAYPOINT_COLOR;
+            ctx.lineWidth = 1;
+            const tooltipY = cy - 25;
+            const tooltipText = `#${index + 1} (${point.x.toFixed(1)}, ${point.y.toFixed(1)})`;
+            ctx.font = '11px "Inter", sans-serif';
+            const metrics = ctx.measureText(tooltipText);
+            const padding = 6;
+            const boxWidth = metrics.width + padding * 2;
+            const boxHeight = 16;
+            
+            ctx.beginPath();
+            ctx.roundRect(cx - boxWidth / 2, tooltipY - boxHeight / 2, boxWidth, boxHeight, 4);
+            ctx.fill();
+            ctx.stroke();
+            
+            ctx.fillStyle = "#e2e8f0";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(tooltipText, cx, tooltipY);
+            
+            // Ring around hovered point
+            ctx.strokeStyle = WAYPOINT_COLOR;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius + 4, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+        
+        const arrowLen = isHovered ? 22 : 18;
+        const arrow = headingVector(heading, arrowLen);
         drawArrow(ctx, cx, cy, cx + arrow.dx, cy + arrow.dy, FOOTPRINT_FILL);
     });
     if (points.length) {
         const last = points[points.length - 1];
+        const isLastHovered = hoveredPoint?.type === 'waypoint' && hoveredPoint?.index === points.length - 1;
         drawFootprint(ctx, last.x, last.y, num(last.h ?? 0), robot.length, robot.width, {
             fill: "#7aa2ff",
             stroke: "#7aa2ff",
-            alpha: 0.12,
+            alpha: isLastHovered ? 0.18 : 0.12,
         }, center, ppi);
     }
     ctx.restore();
@@ -234,12 +364,27 @@ const drawPreview = (ctx, {
         const control = bezierTemp.control;
         const ctrlCanvas = worldToCanvas(control.x, control.y, center.x, center.y, ppi);
         ctx.save();
+        
+        // Enhanced control point visibility
+        ctx.shadowBlur = 6;
+        ctx.shadowColor = "rgba(186, 230, 253, 0.6)";
         ctx.fillStyle = "#bae6fd";
-        ctx.globalAlpha = 0.9;
         ctx.beginPath();
-        ctx.arc(ctrlCanvas.cx, ctrlCanvas.cy, 4, 0, Math.PI * 2);
+        ctx.arc(ctrlCanvas.cx, ctrlCanvas.cy, 5, 0, Math.PI * 2);
         ctx.fill();
-        ctx.globalAlpha = 1;
+        
+        // Control line
+        ctx.shadowBlur = 0;
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = "rgba(186, 230, 253, 0.5)";
+        ctx.lineWidth = 1.5;
+        const anchorCanvas = worldToCanvas(anchor.x, anchor.y, center.x, center.y, ppi);
+        ctx.beginPath();
+        ctx.moveTo(anchorCanvas.cx, anchorCanvas.cy);
+        ctx.lineTo(ctrlCanvas.cx, ctrlCanvas.cy);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        
         ctx.restore();
 
         if (!preview) return;
@@ -261,12 +406,27 @@ const drawPreview = (ctx, {
         const midpoint = arcTemp.mid;
         const midCanvas = worldToCanvas(midpoint.x, midpoint.y, center.x, center.y, ppi);
         ctx.save();
+        
+        // Enhanced arc midpoint visibility
+        ctx.shadowBlur = 6;
+        ctx.shadowColor = "rgba(186, 230, 253, 0.6)";
         ctx.fillStyle = "#bae6fd";
-        ctx.globalAlpha = 0.9;
         ctx.beginPath();
-        ctx.arc(midCanvas.cx, midCanvas.cy, 4, 0, Math.PI * 2);
+        ctx.arc(midCanvas.cx, midCanvas.cy, 5, 0, Math.PI * 2);
         ctx.fill();
-        ctx.globalAlpha = 1;
+        
+        // Arc guide lines
+        ctx.shadowBlur = 0;
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = "rgba(186, 230, 253, 0.5)";
+        ctx.lineWidth = 1.5;
+        const anchorCanvas = worldToCanvas(anchor.x, anchor.y, center.x, center.y, ppi);
+        ctx.beginPath();
+        ctx.moveTo(anchorCanvas.cx, anchorCanvas.cy);
+        ctx.lineTo(midCanvas.cx, midCanvas.cy);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        
         ctx.restore();
 
         if (!preview) return;
@@ -429,17 +589,35 @@ const drawDrawOverlay = (ctx, {drawTemp, center, ppi}) => {
 const drawDrawCursor = (ctx, cursorWorld, center, ppi, active) => {
     const pos = worldToCanvas(cursorWorld.x, cursorWorld.y, center.x, center.y, ppi);
     ctx.save();
+    
+    // Enhanced cursor with glow when active
+    if (active) {
+        ctx.shadowBlur = 8;
+        ctx.shadowColor = "rgba(248, 250, 252, 0.6)";
+    }
+    
     ctx.strokeStyle = active ? "#f8fafc" : "#cbd5e1";
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = active ? 2 : 1.5;
     ctx.beginPath();
-    ctx.arc(pos.cx, pos.cy, 9, 0, Math.PI * 2);
+    ctx.arc(pos.cx, pos.cy, 10, 0, Math.PI * 2);
     ctx.stroke();
+    
+    ctx.shadowBlur = 0;
     ctx.beginPath();
-    ctx.moveTo(pos.cx - 12, pos.cy);
-    ctx.lineTo(pos.cx + 12, pos.cy);
-    ctx.moveTo(pos.cx, pos.cy - 12);
-    ctx.lineTo(pos.cx, pos.cy + 12);
+    ctx.moveTo(pos.cx - 14, pos.cy);
+    ctx.lineTo(pos.cx + 14, pos.cy);
+    ctx.moveTo(pos.cx, pos.cy - 14);
+    ctx.lineTo(pos.cx, pos.cy + 14);
     ctx.stroke();
+    
+    // Inner dot
+    if (active) {
+        ctx.fillStyle = "#f8fafc";
+        ctx.beginPath();
+        ctx.arc(pos.cx, pos.cy, 2, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    
     ctx.restore();
 };
 
@@ -634,11 +812,19 @@ export const createCanvasInteraction = ({
     computeHeading,
     shapeType,
     appendPoints,
+    // new: allow caller to provide points (current list) and a callback when a point is placed
+    points,
+    onPointPlaced,
     setPendingBezier,
     bezierTemp,
     setPendingArc,
     arcTemp,
     setPreview,
+    // optional: a function that returns the current preview heading (used to honor wheel-set heading on placement)
+    getPreviewHeading,
+    // allow caller to receive cursor and snapping updates
+    setCursorPos,
+    setIsSnapping,
     drawStateRef,
     setDrawTemp,
 }) => {
@@ -725,11 +911,33 @@ export const createCanvasInteraction = ({
             const heading = num(startPose.h);
             setPreview({x: snapped.x, y: snapped.y, h: heading});
         } else if (shapeType !== "draw") {
-            const heading = computeHeading(snapped.x, snapped.y);
+            // If caller provided a preview-heading getter (e.g. from wheel adjustments), prefer it
+            let heading;
+            try {
+                if (typeof getPreviewHeading === 'function') {
+                    const attempted = getPreviewHeading();
+                    if (typeof attempted === 'number' && !Number.isNaN(attempted)) heading = attempted;
+                }
+            } catch (err) {
+                heading = undefined;
+            }
+            if (typeof heading !== 'number') heading = computeHeading(snapped.x, snapped.y);
             setPreview({x: snapped.x, y: snapped.y, h: heading});
         } else {
             const anchor = appendPoints.getAnchor();
-            if (anchor) setPreview({x: anchor.x, y: anchor.y, h: num(anchor.h ?? startPose.h)});
+            if (anchor) {
+                // prefer external preview heading when available
+                let heading = num(anchor.h ?? startPose.h);
+                try {
+                    if (typeof getPreviewHeading === 'function') {
+                        const attempted = getPreviewHeading();
+                        if (typeof attempted === 'number' && !Number.isNaN(attempted)) heading = attempted;
+                    }
+                } catch (err) {
+                    // ignore
+                }
+                setPreview({x: anchor.x, y: anchor.y, h: heading});
+            }
             else setPreview(null);
         }
         return {snapped};
@@ -845,7 +1053,11 @@ export const createCanvasInteraction = ({
         }
 
         if (selection.type === "line") {
-            appendPoints.single(selection.end.x, selection.end.y);
+            if (typeof getPreviewHeading === "function") {
+                appendPoints.single(selection.end.x, selection.end.y, getPreviewHeading());
+            } else {
+                appendPoints.single(selection.end.x, selection.end.y);
+            }
             return;
         }
         if (selection.type === "bezier") {
@@ -940,6 +1152,10 @@ export const createCanvasInteraction = ({
         } else {
             setPreview(null);
         }
+        
+        // Clear cursor position and snapping state
+        if (setCursorPos) setCursorPos(null);
+        if (setIsSnapping) setIsSnapping(false);
     };
 
     const cancelDraw = () => {
@@ -949,7 +1165,18 @@ export const createCanvasInteraction = ({
         resetDrawState();
         state.ignoreClick = true;
         const anchor = appendPoints.getAnchor();
-        if (anchor) setPreview({x: anchor.x, y: anchor.y, h: num(anchor.h ?? startPose.h ?? 0)});
+        if (anchor) {
+            let heading = num(anchor.h ?? startPose.h ?? 0);
+            try {
+                if (typeof getPreviewHeading === 'function') {
+                    const attempted = getPreviewHeading();
+                    if (typeof attempted === 'number' && !Number.isNaN(attempted)) heading = attempted;
+                }
+            } catch (err) {
+                // ignore
+            }
+            setPreview({x: anchor.x, y: anchor.y, h: heading});
+        }
     };
 
     const onPointerCancel = () => {
@@ -994,7 +1221,13 @@ export const createCanvasInteraction = ({
             setPendingArc({mid: {x: snapped.x, y: snapped.y}});
             return;
         }
-        appendPoints.single(snapped.x, snapped.y);
+        // If a preview heading provider is available, prefer that heading (this respects wheel adjustments)
+        if (typeof getPreviewHeading === "function") {
+            const overrideH = getPreviewHeading();
+            appendPoints.single(snapped.x, snapped.y, overrideH);
+        } else {
+            appendPoints.single(snapped.x, snapped.y);
+        }
     };
 
     return {onPointerDown, onPointerMove, onPointerUp, onPointerLeave, onPointerCancel, onClick, cancelDraw};
@@ -1008,15 +1241,36 @@ export const createAppendPointsApi = ({
     headingMode,
     endHeading,
     resolveHeading,
+    onPointPlaced, // optional callback (point, index) invoked after a point is appended
 }) => ({
     getAnchor: () => {
         if (points.length) return points[points.length - 1];
         return {x: num(startPose.x), y: num(startPose.y), h: num(startPose.h)};
     },
-    single: (x, y) => {
-        const heading = resolveHeading(x, y);
+    // single: append a single point. If `headingOverride` is provided (number), use it
+    // instead of running the resolver. This allows callers to preserve an externally
+    // supplied heading (for example, from scroll-wheel previewing).
+    single: (x, y, headingOverride) => {
+        const heading = typeof headingOverride === 'number' ? headingOverride : resolveHeading(x, y);
         const point = {x, y, h: heading, showHeading: true};
-        setPoints((prev) => [...prev, point]);
+        setPoints((prev) => {
+            const next = [...prev, point];
+            if (typeof onPointPlaced === "function") {
+                try {
+                    // call asynchronously to avoid setState during another component's render
+                    setTimeout(() => {
+                        try {
+                            onPointPlaced(point, next.length - 1, prev);
+                        } catch (err) {
+                            // swallow callback errors
+                        }
+                    }, 0);
+                } catch (err) {
+                    // swallow callback errors
+                }
+            }
+            return next;
+        });
         setUndoStack((prev) => [...prev, {type: "point", count: 1}]);
     },
     fromSamples: (samples, shapeType = "curve") => {
@@ -1029,7 +1283,24 @@ export const createAppendPointsApi = ({
             appended.push({x: sample.x, y: sample.y, h: heading, showHeading: index === samples.length - 1});
             prev = sample;
         });
-        setPoints((prev) => [...prev, ...appended]);
+        setPoints((prev) => {
+            const next = [...prev, ...appended];
+            if (typeof onPointPlaced === "function" && appended.length) {
+                try {
+                    // notify about the last appended point asynchronously to avoid cross-component setState during render
+                    setTimeout(() => {
+                        try {
+                            onPointPlaced(appended[appended.length - 1], next.length - 1, prev);
+                        } catch (err) {
+                            // ignore
+                        }
+                    }, 0);
+                } catch (err) {
+                    // ignore
+                }
+            }
+            return next;
+        });
         setUndoStack((prev) => [...prev, {type: shapeType, count: appended.length}]);
     },
 });

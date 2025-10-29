@@ -1,0 +1,245 @@
+/**
+ * Design Tokens - FTC Path Planner
+ * Comprehensive design system for desktop dark theme
+ */
+
+:root {
+  /* ============================================
+     PRIMARY COLORS - Modern Blue Palette
+     ============================================ */
+  --color-primary-light: #4FC3F7;
+  --color-primary: #29B6F6;
+  --color-primary-dark: #039BE5;
+  --color-primary-darker: #0277BD;
+
+  /* ============================================
+     SEMANTIC COLORS
+     ============================================ */
+  /* Success */
+  --color-success-light: #66BB6A;
+  --color-success: #4CAF50;
+  --color-success-dark: #388E3C;
+  
+  /* Warning */
+  --color-warning-light: #FFA726;
+  --color-warning: #FF9800;
+  --color-warning-dark: #F57C00;
+  
+  /* Danger */
+  --color-danger-light: #EF5350;
+  --color-danger: #F44336;
+  --color-danger-dark: #D32F2F;
+  
+  /* Info */
+  --color-info-light: #42A5F5;
+  --color-info: #2196F3;
+  --color-info-dark: #1976D2;
+
+  /* ============================================
+     SURFACE COLORS - Dark Theme Hierarchy
+     ============================================ */
+  --surface-0: #0A0E1A;      /* Darkest - body background */
+  --surface-1: #0F1525;      /* Dark - secondary background */
+  --surface-2: #141B2E;      /* Medium - panel background */
+  --surface-3: #1A2338;      /* Light - card background */
+  --surface-elevated: #242F4D; /* Elevated - modals, dropdowns */
+
+  /* ============================================
+     TEXT COLORS - Hierarchy
+     ============================================ */
+  --text-primary: #F0F4FF;    /* High emphasis - 95% opacity */
+  --text-secondary: #B8C5E0;  /* Medium emphasis - 70% opacity */
+  --text-tertiary: #7A8AAF;   /* Low emphasis - 50% opacity */
+  --text-disabled: #4A5873;   /* Disabled state - 30% opacity */
+  --text-inverse: #0A0E1A;    /* For light backgrounds */
+
+  /* ============================================
+     BORDER COLORS
+     ============================================ */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.10);
+  --border-emphasis: rgba(255, 255, 255, 0.18);
+  --border-strong: rgba(255, 255, 255, 0.26);
+
+  /* ============================================
+     INTERACTIVE STATE COLORS
+     ============================================ */
+  --state-hover-overlay: rgba(255, 255, 255, 0.08);
+  --state-active-overlay: rgba(255, 255, 255, 0.12);
+  --state-focus-ring: rgba(79, 195, 247, 0.5);
+  --state-disabled-bg: rgba(255, 255, 255, 0.03);
+  --state-disabled-text: var(--text-disabled);
+
+  /* ============================================
+     SHADOW SYSTEM
+     ============================================ */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-xl: 0 12px 32px rgba(0, 0, 0, 0.4);
+  --shadow-focus: 0 0 0 3px var(--state-focus-ring);
+
+  /* ============================================
+     SPACING SCALE - 4px base unit
+     ============================================ */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 24px;
+  --space-2xl: 32px;
+  --space-3xl: 48px;
+  --space-4xl: 64px;
+
+  /* ============================================
+     TYPOGRAPHY SCALE
+     ============================================ */
+  /* Font Families */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Courier New", monospace;
+
+  /* Font Weights */
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* Font Sizes & Line Heights */
+  --text-xs: 11px;
+  --text-xs-line-height: 16px;
+  
+  --text-sm: 12px;
+  --text-sm-line-height: 18px;
+  
+  --text-base: 14px;
+  --text-base-line-height: 20px;
+  
+  --text-md: 15px;
+  --text-md-line-height: 22px;
+  
+  --text-lg: 16px;
+  --text-lg-line-height: 24px;
+  
+  --text-xl: 18px;
+  --text-xl-line-height: 26px;
+  
+  --text-2xl: 20px;
+  --text-2xl-line-height: 28px;
+  
+  --text-3xl: 24px;
+  --text-3xl-line-height: 32px;
+
+  /* Letter Spacing */
+  --letter-spacing-tight: -0.01em;
+  --letter-spacing-normal: 0;
+  --letter-spacing-wide: 0.015em;
+  --letter-spacing-wider: 0.025em;
+
+  /* ============================================
+     BORDER RADIUS
+     ============================================ */
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+  --radius-2xl: 16px;
+  --radius-full: 9999px;
+
+  /* ============================================
+     Z-INDEX SCALE
+     ============================================ */
+  --z-base: 0;
+  --z-dropdown: 1000;
+  --z-sticky: 1100;
+  --z-overlay: 1200;
+  --z-modal: 1300;
+  --z-tooltip: 1400;
+
+  /* ============================================
+     TRANSITIONS & ANIMATIONS
+     ============================================ */
+  --transition-fast: 100ms;
+  --transition-base: 150ms;
+  --transition-slow: 250ms;
+  --transition-slower: 350ms;
+  
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0.0, 0, 0.2, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+
+  /* ============================================
+     COMPONENT-SPECIFIC TOKENS
+     ============================================ */
+  /* Buttons */
+  --button-height-sm: 32px;
+  --button-height-md: 40px;
+  --button-height-lg: 48px;
+  --button-padding-x: var(--space-lg);
+  --button-padding-y: var(--space-md);
+
+  /* Inputs */
+  --input-height: 40px;
+  --input-padding-x: var(--space-md);
+  --input-padding-y: 10px;
+  --input-border-width: 1px;
+
+  /* Panels */
+  --panel-padding: var(--space-lg);
+  --panel-border-radius: var(--radius-xl);
+  --panel-header-height: 48px;
+
+  /* Cards */
+  --card-padding: var(--space-lg);
+  --card-border-radius: var(--radius-xl);
+  --card-gap: var(--space-lg);
+
+  /* ============================================
+     LEGACY COMPATIBILITY MAPPINGS
+     (Ensures existing code continues to work)
+     ============================================ */
+  --bg: var(--surface-0);
+  --panel: var(--surface-2);
+  --card: var(--surface-3);
+  --edge: var(--surface-elevated);
+  --text: var(--text-primary);
+  --muted: var(--text-secondary);
+  --accent: var(--color-primary-light);
+  --ok: var(--color-success-light);
+  --warn: var(--color-warning-light);
+  --danger: var(--color-danger-light);
+  --shadow: var(--shadow-lg);
+
+  /* Color scheme */
+  color-scheme: dark;
+}
+
+/* ============================================
+   UTILITY CLASSES
+   ============================================ */
+
+/* Text utilities */
+.text-primary { color: var(--text-primary); }
+.text-secondary { color: var(--text-secondary); }
+.text-tertiary { color: var(--text-tertiary); }
+.text-disabled { color: var(--text-disabled); }
+
+/* Font weight utilities */
+.font-normal { font-weight: var(--font-weight-normal); }
+.font-medium { font-weight: var(--font-weight-medium); }
+.font-semibold { font-weight: var(--font-weight-semibold); }
+.font-bold { font-weight: var(--font-weight-bold); }
+
+/* Spacing utilities */
+.gap-xs { gap: var(--space-xs); }
+.gap-sm { gap: var(--space-sm); }
+.gap-md { gap: var(--space-md); }
+.gap-lg { gap: var(--space-lg); }
+.gap-xl { gap: var(--space-xl); }
+
+/* Surface utilities */
+.surface-0 { background: var(--surface-0); }
+.surface-1 { background: var(--surface-1); }
+.surface-2 { background: var(--surface-2); }
+.surface-3 { background: var(--surface-3); }
+.surface-elevated { background: var(--surface-elevated); }
