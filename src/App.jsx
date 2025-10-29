@@ -33,6 +33,7 @@ import {usePosePolling} from "./hooks/usePosePolling";
 import {usePlayback} from "./hooks/usePlayback";
 import {clamp, num, normDeg, toFixed} from "./utils/math";
 import {polylineLength} from "./utils/path";
+import TAG_REGISTRY from "./constants/tags";
 
 function wrapAngleRad(a) {
     // wrap to (-π, π]
@@ -542,6 +543,19 @@ export default function App() {
     };
 
     const code = useMemo(() => {
+        // helper: extract numeric value for a tag object using TAG_REGISTRY metadata
+        const extractTagNumericValue = (t) => {
+            const key = t.id ?? t.name ?? t.label ?? String(t.label ?? t.id ?? t.name ?? "");
+            const reg = TAG_REGISTRY.find((r) => r.id === key || r.label === key);
+            let paramName = null;
+            if (reg && Array.isArray(reg.params) && reg.params.length > 0) {
+                // prefer numeric param if present
+                const numParam = reg.params.find(p => p.type === 'number');
+                paramName = (numParam && numParam.name) || reg.params[0].name;
+            }
+            const val = paramName ? (t.params?.[paramName]) : (t.params?.value ?? t.value);
+            return Number(val ?? 0) || 0;
+        };
         const sx = toFixed(num(startPose.x));
         const sy = toFixed(num(startPose.y));
         const sh = toFixed(num(startPose.h));
@@ -557,7 +571,10 @@ export default function App() {
             if (!Array.isArray(p.tags)) return [];
             return p.tags.map((t) => {
                 const name = t.id ?? t.name ?? String(t.label ?? t);
-                const value = Number(t.params?.value ?? t.value ?? 0) || 0;
+                // determine which param represents the numeric value for this tag
+                const reg = TAG_REGISTRY.find((r) => r.id === (t.id ?? t.name ?? t.label));
+                const paramName = reg && Array.isArray(reg.params) && reg.params.length > 0 ? reg.params[0].name : 'value';
+                const value = Number(t.params?.[paramName] ?? t.params?.value ?? t.value ?? 0) || 0;
                 return { name, value, index: i };
             });
         });
@@ -595,7 +612,9 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
             if (!Array.isArray(p.tags)) return [];
             return p.tags.map((t) => {
                 const name = t.id ?? t.name ?? String(t.label ?? t);
-                const value = Number(t.params?.value ?? t.value ?? 0) || 0;
+                const reg = TAG_REGISTRY.find((r) => r.id === (t.id ?? t.name ?? t.label));
+                const paramName = reg && Array.isArray(reg.params) && reg.params.length > 0 ? reg.params[0].name : 'value';
+                const value = Number(t.params?.[paramName] ?? t.params?.value ?? t.value ?? 0) || 0;
                 return { index: i, name, value };
             });
         });
