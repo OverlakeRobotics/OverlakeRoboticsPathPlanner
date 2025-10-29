@@ -2,13 +2,13 @@ import { useState } from "react";
 
 const TAG_TEMPLATES = [
   { name: "velocity", defaultValue: 50, unit: "in/s" },
-  { name: "pause", defaultValue: 1000, unit: "ms" },
+  { name: "pause", defaultValue: 1, unit: "seconds" },
   { name: "intake", defaultValue: 0, unit: "velocity" },
   { name: "autoAimRed", defaultValue: 0, unit: "" },
   { name: "autoAimBlue", defaultValue: 0, unit: "" },
   { name: "shooterVelocity", defaultValue: 0, unit: "velocity" },
   { name: "hoodAngle", defaultValue: 0, unit: "degrees" },
-  { name: "launchArtifacts", defaultValue: 1000, unit: "ms" },
+  { name: "launchArtifacts", defaultValue: 1, unit: "seconds" },
 ];
 
 export default function TagModal({ isOpen, onClose, onAddTag, pointIndex, pointsCount }) {

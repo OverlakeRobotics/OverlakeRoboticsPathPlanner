@@ -37,6 +37,7 @@ export default function RunPanel({
                                      onRemoveTag,
                                      onEditTag,
                                      onReorderTags,
+                                     onAddTag,
                                      // NEW:
                                      estTimeSec,
                                      onExportPath,
@@ -52,6 +53,11 @@ export default function RunPanel({
     const [editValue, setEditValue] = useState(0);
     const [editPointIndex, setEditPointIndex] = useState(0);
     const [draggedIndex, setDraggedIndex] = useState(null);
+
+    const [isAddingTag, setIsAddingTag] = useState(false);
+    const [newTagName, setNewTagName] = useState("");
+    const [newTagValue, setNewTagValue] = useState("");
+    const [newTagPointIndex, setNewTagPointIndex] = useState("");
 
     return (
         <aside className="panel panel-run">
@@ -105,48 +111,9 @@ export default function RunPanel({
 
                 <section className="control-card">
                     <div className="card-header">
-                        <h3>Manage Path</h3>
-                        <p>Undo or clear points.</p>
+                        <h3>Tags</h3>
                     </div>
-                    <div className="card-actions stack">
-                        <button className="btn ghost" onClick={onUndo}>
-                            Undo last
-                        </button>
-                        <button className="btn danger" onClick={onClear}>
-                            Clear path
-                        </button>
-                    </div>
-                </section>
-
-                <section className="control-card">
-                    <div className="card-header">
-                        <h3>Import / Export</h3>
-                        <p>Save or import path.</p>
-                    </div>
-                    <div className="card-actions stack">
-                        <button className="btn primary" onClick={onExportPath}>
-                            Export JSON
-                        </button>
-                        <input
-                            ref={fileInputRef}
-                            type="file"
-                            accept="application/json,.json"
-                            className="input"
-                            onChange={(e) => {
-                                const f = e.target.files?.[0];
-                                if (f) onImportFile(f);
-                                e.currentTarget.value = "";
-                            }}
-                        />
-                    </div>
-                </section>
-
-                {!!tags.length && (
-                    <section className="control-card">
-                        <div className="card-header">
-                            <h3>Tags</h3>
-                            <p>Drag to reorder, click Edit to modify.</p>
-                        </div>
+                    {!!tags.length && (
                         <div className="tag-list">
                             {tags.map((tag, index) => {
                                 const isEditing = editingIndex === index;
@@ -253,8 +220,146 @@ export default function RunPanel({
                                 );
                             })}
                         </div>
-                    </section>
-                )}
+                    )}
+                    {isAddingTag && (
+                            <div className="tag-pill">
+                                <div className="field">
+                                    <label>Tag Type</label>
+                                    <select
+                                        value={newTagName}
+                                        onChange={(e) => {
+                                            const selectedName = e.target.value;
+                                            setNewTagName(selectedName);
+                                            // Set default values based on tag type
+                                            const defaults = {
+                                                velocity: 50,
+                                                pause: 1,
+                                                intake: 0,
+                                                autoAimRed: 0,
+                                                autoAimBlue: 0,
+                                                shooterVelocity: 0,
+                                                hoodAngle: 0,
+                                                launchArtifacts: 1,
+                                            };
+                                            if (defaults[selectedName] !== undefined) {
+                                                setNewTagValue(defaults[selectedName]);
+                                            }
+                                        }}
+                                        autoFocus
+                                    >
+                                        <option value="">-- Select Tag Type --</option>
+                                        <option value="velocity">velocity - Change robot velocity (in/s)</option>
+                                        <option value="pause">pause - Pause at point (seconds)</option>
+                                        <option value="intake">intake - Control intake motor</option>
+                                        <option value="autoAimRed">autoAimRed - Auto-aim for red alliance</option>
+                                        <option value="autoAimBlue">autoAimBlue - Auto-aim for blue alliance</option>
+                                        <option value="shooterVelocity">shooterVelocity - Set shooter velocity</option>
+                                        <option value="hoodAngle">hoodAngle - Set hood angle (degrees)</option>
+                                        <option value="launchArtifacts">launchArtifacts - Launch/shoot (seconds)</option>
+                                    </select>
+                                </div>
+                                <div className="field">
+                                    <label>Value</label>
+                                    <input
+                                        type="number"
+                                        step="0.1"
+                                        value={newTagValue}
+                                        onChange={(e) => setNewTagValue(e.target.value)}
+                                        placeholder="0"
+                                    />
+                                </div>
+                                <div className="field">
+                                    <label>Point Index</label>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        max={pointsCount}
+                                        value={newTagPointIndex}
+                                        onChange={(e) => setNewTagPointIndex(e.target.value)}
+                                        placeholder={pointsCount.toString()}
+                                    />
+                                </div>
+                                <p className="helper-text">Point index: 1 = first point, {pointsCount} = last point</p>
+                                <div className="tag-actions">
+                                    <button
+                                        className="btn primary"
+                                        onClick={() => {
+                                            if (newTagName.trim() && onAddTag) {
+                                                const value = Number(newTagValue) || 0;
+                                                const index = Math.max(1, Math.min(pointsCount, Number(newTagPointIndex) || pointsCount));
+                                                onAddTag(newTagName.trim(), value, index);
+                                                setNewTagName("");
+                                                setNewTagValue("");
+                                                setNewTagPointIndex("");
+                                                setIsAddingTag(false);
+                                            }
+                                        }}
+                                        disabled={!newTagName.trim()}
+                                    >
+                                        Add Tag
+                                    </button>
+                                    <button
+                                        className="btn ghost"
+                                        onClick={() => {
+                                            setNewTagName("");
+                                            setNewTagValue("");
+                                            setNewTagPointIndex("");
+                                            setIsAddingTag(false);
+                                        }}
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    {!isAddingTag && (
+                        <button
+                            className="btn pill"
+                            onClick={() => setIsAddingTag(true)}
+                            disabled={pointsCount === 0}
+                        >
+                            + Add Tag
+                        </button>
+                    )}
+                </section>
+
+                <section className="control-card">
+                    <div className="card-header">
+                        <h3>Manage Path</h3>
+                        <p>Undo or clear points.</p>
+                    </div>
+                    <div className="card-actions stack">
+                        <button className="btn ghost" onClick={onUndo}>
+                            Undo last
+                        </button>
+                        <button className="btn danger" onClick={onClear}>
+                            Clear path
+                        </button>
+                    </div>
+                </section>
+
+                <section className="control-card">
+                    <div className="card-header">
+                        <h3>Import / Export</h3>
+                        <p>Save or import path.</p>
+                    </div>
+                    <div className="card-actions stack">
+                        <button className="btn primary" onClick={onExportPath}>
+                            Export JSON
+                        </button>
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept="application/json,.json"
+                            className="input"
+                            onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                if (f) onImportFile(f);
+                                e.currentTarget.value = "";
+                            }}
+                        />
+                    </div>
+                </section>
 
                 <section className="control-card">
                     <div className="card-header">

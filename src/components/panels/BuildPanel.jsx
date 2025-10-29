@@ -35,6 +35,8 @@ export default function BuildPanel({
                                        setTagName,
                                        tagValue,
                                        setTagValue,
+                                       tagPointIndex,
+                                       setTagPointIndex,
                                        addTag,
                                        pointsLength,
                                        editMode,
@@ -92,8 +94,15 @@ export default function BuildPanel({
                                 <input
                                     type="number"
                                     step="0.1"
-                                    value={points[selectedPointIndex]?.x || 0}
-                                    onChange={(e) => updatePoint(selectedPointIndex, { x: parseFloat(e.target.value) || 0 })}
+                                    value={points[selectedPointIndex]?.x ?? ""}
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        if (val === "" || val === "-") {
+                                            updatePoint(selectedPointIndex, { x: 0 });
+                                        } else {
+                                            updatePoint(selectedPointIndex, { x: parseFloat(val) || 0 });
+                                        }
+                                    }}
                                 />
                             </div>
                             <div className="field">
@@ -101,8 +110,15 @@ export default function BuildPanel({
                                 <input
                                     type="number"
                                     step="0.1"
-                                    value={points[selectedPointIndex]?.y || 0}
-                                    onChange={(e) => updatePoint(selectedPointIndex, { y: parseFloat(e.target.value) || 0 })}
+                                    value={points[selectedPointIndex]?.y ?? ""}
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        if (val === "" || val === "-") {
+                                            updatePoint(selectedPointIndex, { y: 0 });
+                                        } else {
+                                            updatePoint(selectedPointIndex, { y: parseFloat(val) || 0 });
+                                        }
+                                    }}
                                 />
                             </div>
                             <div className="field">
@@ -110,8 +126,15 @@ export default function BuildPanel({
                                 <input
                                     type="number"
                                     step="1"
-                                    value={points[selectedPointIndex]?.h || 0}
-                                    onChange={(e) => updatePoint(selectedPointIndex, { h: parseFloat(e.target.value) || 0 })}
+                                    value={points[selectedPointIndex]?.h ?? ""}
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        if (val === "" || val === "-") {
+                                            updatePoint(selectedPointIndex, { h: 0 });
+                                        } else {
+                                            updatePoint(selectedPointIndex, { h: parseFloat(val) || 0 });
+                                        }
+                                    }}
                                 />
                             </div>
                             <button
@@ -354,13 +377,13 @@ export default function BuildPanel({
                                         // Set default values based on tag type
                                         const defaults = {
                                             velocity: 50,
-                                            pause: 1000,
+                                            pause: 1,
                                             intake: 0,
                                             autoAimRed: 0,
                                             autoAimBlue: 0,
                                             shooterVelocity: 0,
                                             hoodAngle: 0,
-                                            launchArtifacts: 1000,
+                                            launchArtifacts: 1,
                                         };
                                         if (defaults[selectedName] !== undefined) {
                                             setTagValue(defaults[selectedName]);
@@ -368,22 +391,34 @@ export default function BuildPanel({
                                     }}>
                                         <option value="">-- Custom --</option>
                                         <option value="velocity">velocity - Change robot velocity (in/s)</option>
-                                        <option value="pause">pause - Pause at point (ms)</option>
+                                        <option value="pause">pause - Pause at point (seconds)</option>
                                         <option value="intake">intake - Control intake motor</option>
                                         <option value="autoAimRed">autoAimRed - Auto-aim for red alliance</option>
                                         <option value="autoAimBlue">autoAimBlue - Auto-aim for blue alliance</option>
                                         <option value="shooterVelocity">shooterVelocity - Set shooter velocity</option>
                                         <option value="hoodAngle">hoodAngle - Set hood angle (degrees)</option>
-                                        <option value="launchArtifacts">launchArtifacts - Launch/shoot (ms)</option>
+                                        <option value="launchArtifacts">launchArtifacts - Launch/shoot (seconds)</option>
                                     </select>
                                 </Field>
                                 <Field label="Value">
-                                    <input type="number" step={1} placeholder="0" value={tagValue} onChange={(event) => setTagValue(event.target.value)} />
+                                    <input type="number" step={0.1} placeholder="0" value={tagValue} onChange={(event) => setTagValue(event.target.value)} />
+                                </Field>
+                                <Field label="Point Index">
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        max={pointsLength}
+                                        step={1}
+                                        placeholder={pointsLength}
+                                        value={tagPointIndex || pointsLength}
+                                        onChange={(event) => setTagPointIndex(event.target.value)}
+                                    />
                                 </Field>
                             </div>
+                            <p className="helper-text">Point index: 1 = first point, {pointsLength} = last point</p>
                             <div className="card-actions">
                                 <button className="btn pill" onClick={addTag} disabled={pointsLength === 0 || !tagName.trim()}>
-                                    Add tag to latest point
+                                    Add Tag
                                 </button>
                             </div>
                         </>

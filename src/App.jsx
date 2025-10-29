@@ -193,7 +193,8 @@ export default function App() {
 
     const [tags, setTags] = useState([]);
     const [tagName, setTagName] = useState("");
-    const [tagValue, setTagValue] = useState(0);
+    const [tagValue, setTagValue] = useState("");
+    const [tagPointIndex, setTagPointIndex] = useState(""); // Index for manual tag placement
     const [showTagModal, setShowTagModal] = useState(false);
     const [pendingTagPointIndex, setPendingTagPointIndex] = useState(null);
 
@@ -408,13 +409,19 @@ export default function App() {
         if (points.length === 0) return;
         const name = (tagName ?? "").trim();
         if (!name) return;
-        const value = Math.floor(Number(tagValue) || 0);
-        setTags((prev) => [...prev, {index: points.length, name, value}]);
+        const value = Number(tagValue) || 0;
+        const targetIndex = Math.max(1, Math.min(points.length, Number(tagPointIndex) || points.length));
+        setTags((prev) => [...prev, {index: targetIndex, name, value}]);
         setTagName("");
-        setTagValue(0);
+        setTagValue("");
+        setTagPointIndex("");
     };
 
     const addTagFromModal = (name, value, pointIndex) => {
+        setTags((prev) => [...prev, {index: pointIndex, name, value}]);
+    };
+
+    const addTagFromRunPanel = (name, value, pointIndex) => {
         setTags((prev) => [...prev, {index: pointIndex, name, value}]);
     };
 
@@ -690,6 +697,8 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                 setTagName={setTagName}
                 tagValue={tagValue}
                 setTagValue={setTagValue}
+                tagPointIndex={tagPointIndex}
+                setTagPointIndex={setTagPointIndex}
                 addTag={addTag}
                 pointsLength={points.length}
                 editMode={editMode}
@@ -779,6 +788,7 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                 onRemoveTag={removeTag}
                 onEditTag={editTag}
                 onReorderTags={reorderTags}
+                onAddTag={addTagFromRunPanel}
                 estTimeSec={estRunTimeSeconds}
                 onExportPath={onExportPath}
                 onImportFile={onImportPath}
