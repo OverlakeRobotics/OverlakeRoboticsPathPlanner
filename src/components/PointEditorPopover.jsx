@@ -183,10 +183,94 @@ export default function PointEditorPopover({ point, index, position, onSave, onC
     emitChange({ h: Number(val) });
   }
 
+  // Dynamically adjust popover position to avoid being hidden by panels
+  const popoverWidth = 340;
+  const popoverHeight = 450; // approximate max height
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  
+  // Detect the canvas element and compute displayed (CSS) coordinates
+  const canvas = document.querySelector('canvas[role="img"]');
+  const margin = 10;
+
+  // default to full-viewport safe zone if canvas not found
+  let canvasWidth = viewportWidth;
+  let canvasHeight = viewportHeight;
+  let rectWidth = viewportWidth;
+  let rectHeight = viewportHeight;
+
+  if (canvas) {
+    const rect = canvas.getBoundingClientRect();
+    rectWidth = rect.width;
+    rectHeight = rect.height;
+    // canvas.width/height are the internal pixel buffer sizes
+    canvasWidth = canvas.width || rectWidth;
+    canvasHeight = canvas.height || rectHeight;
+  }
+
+  // scale from internal canvas coords to displayed CSS pixels
+  const scaleX = rectWidth / canvasWidth;
+  const scaleY = rectHeight / canvasHeight;
+
+  // canvas-local displayed bounds (relative to canvas-stack)
+  const leftBound = margin;
+  const rightBound = rectWidth - margin;
+  const topBound = margin;
+  const bottomBound = rectHeight - margin;
+
+  // Start with point in internal canvas coords (cx/cy) and convert to displayed pixels
+  const pointX = (position?.left ?? 0) * scaleX;
+  const pointY = (position?.top ?? 0) * scaleY;
+
+  let left = pointX + 12;
+  let top = pointY - 8;
+
+  // Check if default position (to the right of point) would overflow canvas right edge
+  if (left + popoverWidth > rightBound) {
+    // Position to the LEFT of the point instead
+    left = pointX - popoverWidth - 12;
+  }
+
+  // If positioning to the left would overflow canvas left edge, try right again or clamp
+  if (left < leftBound) {
+    // Try positioning to the right of the point
+    const rightPosition = pointX + 12;
+    if (rightPosition + popoverWidth <= rightBound) {
+      // Right side has room within canvas
+      left = rightPosition;
+    } else {
+      // Neither side has full room - clamp to canvas left edge
+      left = leftBound;
+    }
+  }
+
+  // Ensure we stay within canvas right boundary
+  if (left + popoverWidth > rightBound) {
+    left = Math.max(leftBound, rightBound - popoverWidth);
+  }
+
+  // Vertical positioning - stay close to point and within canvas
+  if (top + popoverHeight > bottomBound) {
+    // Flip above the point, staying close
+    top = pointY - popoverHeight - 12;
+    // If that goes off the canvas top, clamp to canvas top
+    if (top < topBound) {
+      top = topBound;
+    }
+  }
+
+  // Final clamp to ensure visibility within canvas
+  if (top < topBound) {
+    top = topBound;
+  }
+  if (top + popoverHeight > bottomBound) {
+    top = Math.max(topBound, bottomBound - popoverHeight);
+  }
+
   const style = {
     position: "absolute",
-    left: (position?.left ?? 0) + 12,
-    top: (position?.top ?? 0) - 8,
+    left,
+    top,
     width: 340,
     maxWidth: "38vw",
     background: "rgba(15,23,42,0.98)",
@@ -194,7 +278,7 @@ export default function PointEditorPopover({ point, index, position, onSave, onC
     borderRadius: 10,
     padding: 14,
     boxShadow: "0 8px 28px rgba(2,6,23,0.6)",
-    zIndex: 60,
+    zIndex: 10001,
     fontSize: 13,
   };
 
