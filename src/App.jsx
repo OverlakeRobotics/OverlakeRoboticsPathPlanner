@@ -574,7 +574,7 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
         tolerance: Number(tolerance) || 0,
         snapInches: Number(snapInches) || 0,
         robot: {...robotDimensions},
-        tags: tags.map((t) => ({...t, index: Number(t.index) || 0, value: Number(t.value) || 0, name: String(t.name || "")})),
+        tags: tags.map((t) => ({index: Number(t.index) || 0, name: String(t.name || ""), value: Number(t.value) || 0})),
     });
 
     const onExportPath = () => {
@@ -618,9 +618,9 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
             if (Number.isFinite(Number(data.snapInches))) setSnapInches(String(Number(data.snapInches)));
             if (data.robot && typeof data.robot === "object") setRobotDimensions({...robotDimensions, ...data.robot});
             if (Array.isArray(data.tags)) setTags(data.tags.map((t) => ({
+                index: getNum(t.index),
                 name: String(t.name || ""),
                 value: getNum(t.value),
-                index: getNum(t.index),
             })));
 
             setBezierTemp(null);
