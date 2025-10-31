@@ -718,3 +718,268 @@ textarea.code-box::-webkit-scrollbar-thumb:hover {
   font-size: 13px;
   color: var(--text);
 }
+
+/* Point-based Tags UI */
+.point-section {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+  margin-bottom: 10px;
+}
+
+.point-section:hover {
+  border-color: rgba(255, 255, 255, 0.14);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.point-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+  user-select: none;
+  transition: background 150ms ease;
+}
+
+.point-header:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.point-header:focus-visible {
+  outline: 2px solid rgba(92, 210, 255, 0.6);
+  outline-offset: -2px;
+}
+
+.point-header > div:first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.point-header h4 {
+  margin: 0 0 4px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.2px;
+}
+
+.point-header p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+}
+
+.tag-count {
+  margin-top: 4px !important;
+  font-family: ui-sans-serif, system-ui, sans-serif !important;
+  font-size: 11px !important;
+  color: var(--accent) !important;
+  font-weight: 500;
+}
+
+.collapse-caret {
+  font-size: 16px;
+  color: var(--muted);
+  transition: transform 150ms ease, color 150ms ease;
+  flex-shrink: 0;
+  width: 24px;
+  text-align: center;
+}
+
+.point-header[aria-expanded="true"] .collapse-caret {
+  color: var(--accent);
+}
+
+.point-tags-content {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(0, 0, 0, 0.15);
+  animation: expandSection 200ms ease-out;
+}
+
+@keyframes expandSection {
+  from {
+    opacity: 0;
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+  to {
+    opacity: 1;
+    max-height: 2000px;
+    padding-top: 16px;
+    padding-bottom: 16px;
+  }
+}
+
+.point-tag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.point-tag-item {
+  animation: slideIn 200ms ease-out;
+}
+
+.point-tag-item {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: all 150ms ease;
+  cursor: default;
+}
+
+.point-tag-item[draggable="true"] {
+  cursor: grab;
+}
+
+.point-tag-item[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.point-tag-item:hover:not(.dragging) {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.point-tag-item.dragging {
+  opacity: 0.4;
+  transform: scale(0.98);
+  cursor: grabbing;
+}
+
+.point-tag-item.drag-over {
+  border-color: var(--accent);
+  background: rgba(92, 210, 255, 0.12);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(92, 210, 255, 0.3);
+}
+
+.point-tag-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.drag-handle {
+  color: var(--muted);
+  font-size: 16px;
+  cursor: grab;
+  user-select: none;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: color 150ms ease, transform 150ms ease;
+  opacity: 0.6;
+}
+
+.point-tag-item:hover .drag-handle {
+  color: var(--accent);
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+.point-tag-item:active .drag-handle {
+  cursor: grabbing;
+  transform: scale(0.95);
+}
+
+.point-tag-item.dragging .drag-handle {
+  opacity: 0.3;
+}
+
+.point-tag-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.point-tag-value {
+  font-size: 12px;
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  white-space: nowrap;
+}
+
+.point-tag-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.point-tag-actions .btn {
+  flex: 1;
+  min-width: fit-content;
+}
+
+.point-tag-actions .btn.primary {
+  flex: 2;
+}
+
+.point-tags-content .helper-text {
+  text-align: center;
+  padding: 12px;
+  font-style: italic;
+  opacity: 0.7;
+}
+
+.point-tags-content > .btn.pill,
+.point-tags-content > .btn.primary {
+  margin-top: 4px;
+}
+
+/* Improved field grid layout for tags */
+#tags-card .field-grid {
+  margin-bottom: 8px;
+}
+
+/* Better spacing for tag sections */
+#tags-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+  margin-top: 8px;
+}
+
+/* Empty state styling */
+#tags-card > .helper-text {
+  text-align: center;
+  padding: 20px;
+  font-style: italic;
+  opacity: 0.7;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 8px;
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+}

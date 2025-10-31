@@ -42,6 +42,7 @@ export default function RunPanel({
                                      estTimeSec,
                                      onExportPath,
                                      onImportFile,
+                                     points,
                                  }) {
     const lengthDisplay = toFixed(totalLength, 1);
     const timeDisplay = Number.isFinite(estTimeSec) ? toFixed(estTimeSec, 1) : "0.0";
@@ -53,16 +54,35 @@ export default function RunPanel({
     const [editValue, setEditValue] = useState(0);
     const [editPointIndex, setEditPointIndex] = useState(0);
     const [draggedIndex, setDraggedIndex] = useState(null);
+    const [dragOverIndex, setDragOverIndex] = useState(null);
+    const [expandedPoints, setExpandedPoints] = useState({});
 
     const [isAddingTag, setIsAddingTag] = useState(false);
     const [newTagName, setNewTagName] = useState("");
     const [newTagValue, setNewTagValue] = useState("");
     const [newTagPointIndex, setNewTagPointIndex] = useState("");
 
+    // Group tags by point index
+    const tagsByPoint = tags.reduce((acc, tag, index) => {
+        const pointIndex = tag.index - 1; // Convert to 0-based
+        if (!acc[pointIndex]) {
+            acc[pointIndex] = [];
+        }
+        acc[pointIndex].push({...tag, originalIndex: index});
+        return acc;
+    }, {});
+
+    const togglePointExpansion = (pointIndex) => {
+        setExpandedPoints((prev) => ({
+            ...prev,
+            [pointIndex]: !prev[pointIndex]
+        }));
+    };
+
     return (
         <aside className="panel panel-run">
             <div className="panel-header">
-                <h2>Run &amp; Export</h2>
+                <h2>Run & Export</h2>
             </div>
             <div className="panel-body scroll-area">
                 <section className="control-card">
@@ -112,214 +132,297 @@ export default function RunPanel({
                 <section className="control-card">
                     <div className="card-header">
                         <h3>Tags</h3>
+                        <p>Organize actions by path point</p>
                     </div>
-                    {!!tags.length && (
-                        <div className="tag-list">
-                            {tags.map((tag, index) => {
-                                const isEditing = editingIndex === index;
+                    {points.length === 0 ? (
+                        <p className="helper-text">Add points to the path to create tags</p>
+                    ) : (
+                        <>
+                            {points.map((point, pointIndex) => {
+                        const pointTags = tagsByPoint[pointIndex] || [];
+                        const isExpanded = expandedPoints[pointIndex];
 
-                                return (
-                                    <div
-                                        key={`${tag.name}-${index}`}
-                                        className={`tag-pill ${draggedIndex === index ? 'dragging' : ''}`}
-                                        draggable={!isEditing}
-                                        onDragStart={(e) => {
-                                            setDraggedIndex(index);
-                                            e.dataTransfer.effectAllowed = 'move';
-                                        }}
-                                        onDragOver={(e) => {
-                                            e.preventDefault();
-                                            e.dataTransfer.dropEffect = 'move';
-                                        }}
-                                        onDrop={(e) => {
-                                            e.preventDefault();
-                                            if (draggedIndex !== null && draggedIndex !== index && onReorderTags) {
-                                                onReorderTags(draggedIndex, index);
-                                            }
-                                            setDraggedIndex(null);
-                                        }}
-                                        onDragEnd={() => setDraggedIndex(null)}
-                                    >
-                                        {isEditing ? (
-                                            <>
+                        return (
+                            <div key={pointIndex} className="point-section">
+                                <div
+                                    className="point-header"
+                                    role="button"
+                                    tabIndex={0}
+                                    aria-expanded={isExpanded}
+                                    onClick={() => togglePointExpansion(pointIndex)}
+                                    onKeyDown={(event) => {
+                                        if (event.key === "Enter" || event.key === " ") {
+                                            event.preventDefault();
+                                            togglePointExpansion(pointIndex);
+                                        }
+                                    }}
+                                >
+                                    <div>
+                                        <h4>Point {pointIndex + 1}</h4>
+                                        <p>({point.x?.toFixed(1) || "0"}, {point.y?.toFixed(1) || "0"}){point.h !== undefined ? ` • ${point.h}°` : ""}</p>
+                                        {pointTags.length > 0 && (
+                                            <p className="tag-count">{pointTags.length} tag{pointTags.length !== 1 ? 's' : ''}</p>
+                                        )}
+                                    </div>
+                                    <span className="collapse-caret">{isExpanded ? "▾" : "▸"}</span>
+                                </div>
+
+                                {isExpanded && (
+                                    <div className="point-tags-content">
+                                        {pointTags.length > 0 ? (
+                                            <div className="point-tag-list">
+                                                {pointTags.map((tag) => {
+                                                    const isEditing = editingIndex === tag.originalIndex;
+
+                                                    return (
+                                                        <div
+                                                            key={tag.originalIndex}
+                                                            className={`point-tag-item ${draggedIndex === tag.originalIndex ? 'dragging' : ''} ${dragOverIndex === tag.originalIndex ? 'drag-over' : ''}`}
+                                                            draggable={!isEditing}
+                                                            onDragStart={(e) => {
+                                                                if (!isEditing) {
+                                                                    setDraggedIndex(tag.originalIndex);
+                                                                    e.dataTransfer.effectAllowed = 'move';
+                                                                    e.dataTransfer.setData('text/plain', tag.originalIndex.toString());
+                                                                }
+                                                            }}
+                                                            onDragEnter={(e) => {
+                                                                e.preventDefault();
+                                                                if (draggedIndex !== null && draggedIndex !== tag.originalIndex) {
+                                                                    setDragOverIndex(tag.originalIndex);
+                                                                }
+                                                            }}
+                                                            onDragLeave={(e) => {
+                                                                e.preventDefault();
+                                                                if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget)) {
+                                                                    setDragOverIndex(null);
+                                                                }
+                                                            }}
+                                                            onDragOver={(e) => {
+                                                                e.preventDefault();
+                                                                e.dataTransfer.dropEffect = 'move';
+                                                            }}
+                                                            onDrop={(e) => {
+                                                                e.preventDefault();
+                                                                e.stopPropagation();
+                                                                if (draggedIndex !== null && draggedIndex !== tag.originalIndex && onReorderTags) {
+                                                                    onReorderTags(draggedIndex, tag.originalIndex);
+                                                                }
+                                                                setDraggedIndex(null);
+                                                                setDragOverIndex(null);
+                                                            }}
+                                                            onDragEnd={() => {
+                                                                setDraggedIndex(null);
+                                                                setDragOverIndex(null);
+                                                            }}
+                                                        >
+                                                            {isEditing ? (
+                                                                <>
+                                                                    <div className="field">
+                                                                        <label>Tag Name</label>
+                                                                        <input
+                                                                            type="text"
+                                                                            value={editName}
+                                                                            onChange={(e) => setEditName(e.target.value)}
+                                                                            autoFocus
+                                                                        />
+                                                                    </div>
+                                                                    <div className="field-grid">
+                                                                        <div className="field">
+                                                                            <label>Value</label>
+                                                                            <input
+                                                                                type="number"
+                                                                                value={editValue}
+                                                                                onChange={(e) => setEditValue(Number(e.target.value))}
+                                                                            />
+                                                                        </div>
+                                                                        <div className="field">
+                                                                            <label>Point #</label>
+                                                                            <input
+                                                                                type="number"
+                                                                                min="1"
+                                                                                max={pointsCount}
+                                                                                value={editPointIndex}
+                                                                                onChange={(e) => setEditPointIndex(Number(e.target.value))}
+                                                                            />
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="point-tag-actions">
+                                                                        <button
+                                                                            className="btn primary"
+                                                                            onClick={() => {
+                                                                                if (editName.trim() && onEditTag) {
+                                                                                    onEditTag(tag.originalIndex, editName.trim(), editValue, editPointIndex);
+                                                                                }
+                                                                                setEditingIndex(null);
+                                                                            }}
+                                                                        >
+                                                                            Save
+                                                                        </button>
+                                                                        <button
+                                                                            className="btn ghost"
+                                                                            onClick={() => setEditingIndex(null)}
+                                                                        >
+                                                                            Cancel
+                                                                        </button>
+                                                                    </div>
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    <div className="point-tag-header">
+                                                                        <span className="drag-handle" title="Drag to reorder">⋮⋮</span>
+                                                                        <div style={{flex: 1, minWidth: 0}}>
+                                                                            <span className="point-tag-name">{tag.name}</span>
+                                                                            <div className="point-tag-value">
+                                                                                {tag.value} {tag.value !== tag.index && `• pt ${tag.index}`}
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="point-tag-actions">
+                                                                        <button
+                                                                            className="btn ghost"
+                                                                            onClick={() => {
+                                                                                setEditingIndex(tag.originalIndex);
+                                                                                setEditName(tag.name);
+                                                                                setEditValue(tag.value);
+                                                                                setEditPointIndex(tag.index);
+                                                                            }}
+                                                                        >
+                                                                            Edit
+                                                                        </button>
+                                                                        {onRemoveTag && (
+                                                                            <button 
+                                                                                className="btn danger" 
+                                                                                onClick={() => onRemoveTag(tag.originalIndex)}
+                                                                            >
+                                                                                Delete
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                </>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        ) : (
+                                            <p className="helper-text">No tags for this point</p>
+                                        )}
+
+                                        {!isAddingTag && (
+                                            <button
+                                                className="btn primary"
+                                                onClick={() => {
+                                                    setNewTagName("");
+                                                    setNewTagValue("");
+                                                    setNewTagPointIndex(pointIndex + 1);
+                                                    setIsAddingTag(true);
+                                                }}
+                                                disabled={pointsCount === 0}
+                                                style={{width: '100%'}}
+                                            >
+                                                + Add Tag to Point {pointIndex + 1}
+                                            </button>
+                                        )}
+
+                                        {isAddingTag && (
+                                            <div className="point-tag-item" style={{background: 'rgba(92, 210, 255, 0.08)', borderColor: 'rgba(92, 210, 255, 0.2)'}}>
                                                 <div className="field">
-                                                    <label>Name</label>
-                                                    <input
-                                                        type="text"
-                                                        value={editName}
-                                                        onChange={(e) => setEditName(e.target.value)}
+                                                    <label>Tag Type</label>
+                                                    <select
+                                                        value={newTagName}
+                                                        onChange={(e) => {
+                                                            const selectedName = e.target.value;
+                                                            setNewTagName(selectedName);
+                                                            // Set default values based on tag type
+                                                            const defaults = {
+                                                                velocity: 50,
+                                                                pause: 1,
+                                                                intake: 0,
+                                                                autoAimRed: 0,
+                                                                autoAimBlue: 0,
+                                                                shooterVelocity: 0,
+                                                                hoodAngle: 0,
+                                                                launchArtifacts: 1,
+                                                            };
+                                                            if (defaults[selectedName] !== undefined) {
+                                                                setNewTagValue(defaults[selectedName]);
+                                                            }
+                                                        }}
                                                         autoFocus
-                                                    />
+                                                    >
+                                                        <option value="">-- Select Tag Type --</option>
+                                                        <option value="velocity">velocity - Robot speed (in/s)</option>
+                                                        <option value="pause">pause - Pause duration (sec)</option>
+                                                        <option value="intake">intake - Intake control</option>
+                                                        <option value="autoAimRed">autoAimRed - Red alliance aim</option>
+                                                        <option value="autoAimBlue">autoAimBlue - Blue alliance aim</option>
+                                                        <option value="shooterVelocity">shooterVelocity - Shooter speed</option>
+                                                        <option value="hoodAngle">hoodAngle - Hood angle (deg)</option>
+                                                        <option value="launchArtifacts">launchArtifacts - Launch duration (sec)</option>
+                                                    </select>
                                                 </div>
-                                                <div className="field">
-                                                    <label>Value</label>
-                                                    <input
-                                                        type="number"
-                                                        value={editValue}
-                                                        onChange={(e) => setEditValue(Number(e.target.value))}
-                                                    />
+                                                <div className="field-grid">
+                                                    <div className="field">
+                                                        <label>Value</label>
+                                                        <input
+                                                            type="number"
+                                                            step="0.1"
+                                                            value={newTagValue}
+                                                            onChange={(e) => setNewTagValue(e.target.value)}
+                                                            placeholder="0"
+                                                        />
+                                                    </div>
+                                                    <div className="field">
+                                                        <label>Point #</label>
+                                                        <input
+                                                            type="number"
+                                                            min="1"
+                                                            max={pointsCount}
+                                                            value={newTagPointIndex}
+                                                            onChange={(e) => setNewTagPointIndex(e.target.value)}
+                                                            placeholder={pointIndex + 1}
+                                                        />
+                                                    </div>
                                                 </div>
-                                                <div className="field">
-                                                    <label>Point Index</label>
-                                                    <input
-                                                        type="number"
-                                                        min="0"
-                                                        max={pointsCount}
-                                                        value={editPointIndex}
-                                                        onChange={(e) => setEditPointIndex(Number(e.target.value))}
-                                                    />
-                                                </div>
-                                                <div className="tag-actions">
+                                                <div className="point-tag-actions">
                                                     <button
                                                         className="btn primary"
                                                         onClick={() => {
-                                                            if (editName.trim() && onEditTag) {
-                                                                onEditTag(index, editName.trim(), editValue, editPointIndex);
+                                                            if (newTagName.trim() && onAddTag) {
+                                                                const value = Number(newTagValue) || 0;
+                                                                const index = Math.max(1, Math.min(pointsCount, Number(newTagPointIndex) || pointIndex + 1));
+                                                                onAddTag(newTagName.trim(), value, index);
+                                                                setNewTagName("");
+                                                                setNewTagValue("");
+                                                                setNewTagPointIndex("");
+                                                                setIsAddingTag(false);
                                                             }
-                                                            setEditingIndex(null);
                                                         }}
+                                                        disabled={!newTagName.trim()}
                                                     >
-                                                        Save
+                                                        Add Tag
                                                     </button>
                                                     <button
                                                         className="btn ghost"
-                                                        onClick={() => setEditingIndex(null)}
+                                                        onClick={() => {
+                                                            setNewTagName("");
+                                                            setNewTagValue("");
+                                                            setNewTagPointIndex("");
+                                                            setIsAddingTag(false);
+                                                        }}
                                                     >
                                                         Cancel
                                                     </button>
                                                 </div>
-                                            </>
-                                        ) : (
-                                            <>
-                                                <div className="tag-header">
-                                                    <span className="drag-handle" title="Drag to reorder">⋮⋮</span>
-                                                    <span className="tag-name">{tag.name}</span>
-                                                </div>
-                                                <span className="tag-meta">value {tag.value} • point {tag.index}</span>
-                                                <div className="tag-actions">
-                                                    <button
-                                                        className="btn ghost"
-                                                        onClick={() => {
-                                                            setEditingIndex(index);
-                                                            setEditName(tag.name);
-                                                            setEditValue(tag.value);
-                                                            setEditPointIndex(tag.index);
-                                                        }}
-                                                    >
-                                                        Edit
-                                                    </button>
-                                                    {onRemoveTag && (
-                                                        <button className="btn danger" onClick={() => onRemoveTag(index)}>
-                                                            Delete
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            </>
+                                            </div>
                                         )}
                                     </div>
-                                );
-                            })}
-                        </div>
-                    )}
-                    {isAddingTag && (
-                            <div className="tag-pill">
-                                <div className="field">
-                                    <label>Tag Type</label>
-                                    <select
-                                        value={newTagName}
-                                        onChange={(e) => {
-                                            const selectedName = e.target.value;
-                                            setNewTagName(selectedName);
-                                            // Set default values based on tag type
-                                            const defaults = {
-                                                velocity: 50,
-                                                pause: 1,
-                                                intake: 0,
-                                                autoAimRed: 0,
-                                                autoAimBlue: 0,
-                                                shooterVelocity: 0,
-                                                hoodAngle: 0,
-                                                launchArtifacts: 1,
-                                            };
-                                            if (defaults[selectedName] !== undefined) {
-                                                setNewTagValue(defaults[selectedName]);
-                                            }
-                                        }}
-                                        autoFocus
-                                    >
-                                        <option value="">-- Select Tag Type --</option>
-                                        <option value="velocity">velocity - Change robot velocity (in/s)</option>
-                                        <option value="pause">pause - Pause at point (seconds)</option>
-                                        <option value="intake">intake - Control intake motor</option>
-                                        <option value="autoAimRed">autoAimRed - Auto-aim for red alliance</option>
-                                        <option value="autoAimBlue">autoAimBlue - Auto-aim for blue alliance</option>
-                                        <option value="shooterVelocity">shooterVelocity - Set shooter velocity</option>
-                                        <option value="hoodAngle">hoodAngle - Set hood angle (degrees)</option>
-                                        <option value="launchArtifacts">launchArtifacts - Launch/shoot (seconds)</option>
-                                    </select>
-                                </div>
-                                <div className="field">
-                                    <label>Value</label>
-                                    <input
-                                        type="number"
-                                        step="0.1"
-                                        value={newTagValue}
-                                        onChange={(e) => setNewTagValue(e.target.value)}
-                                        placeholder="0"
-                                    />
-                                </div>
-                                <div className="field">
-                                    <label>Point Index</label>
-                                    <input
-                                        type="number"
-                                        min="1"
-                                        max={pointsCount}
-                                        value={newTagPointIndex}
-                                        onChange={(e) => setNewTagPointIndex(e.target.value)}
-                                        placeholder={pointsCount.toString()}
-                                    />
-                                </div>
-                                <p className="helper-text">Point index: 1 = first point, {pointsCount} = last point</p>
-                                <div className="tag-actions">
-                                    <button
-                                        className="btn primary"
-                                        onClick={() => {
-                                            if (newTagName.trim() && onAddTag) {
-                                                const value = Number(newTagValue) || 0;
-                                                const index = Math.max(1, Math.min(pointsCount, Number(newTagPointIndex) || pointsCount));
-                                                onAddTag(newTagName.trim(), value, index);
-                                                setNewTagName("");
-                                                setNewTagValue("");
-                                                setNewTagPointIndex("");
-                                                setIsAddingTag(false);
-                                            }
-                                        }}
-                                        disabled={!newTagName.trim()}
-                                    >
-                                        Add Tag
-                                    </button>
-                                    <button
-                                        className="btn ghost"
-                                        onClick={() => {
-                                            setNewTagName("");
-                                            setNewTagValue("");
-                                            setNewTagPointIndex("");
-                                            setIsAddingTag(false);
-                                        }}
-                                    >
-                                        Cancel
-                                    </button>
-                                </div>
+                                )}
                             </div>
-                        )}
-                    {!isAddingTag && (
-                        <button
-                            className="btn pill"
-                            onClick={() => setIsAddingTag(true)}
-                            disabled={pointsCount === 0}
-                        >
-                            + Add Tag
-                        </button>
+                        );
+                    })}
+                        </>
                     )}
                 </section>
 

@@ -45,6 +45,9 @@ export default function BuildPanel({
                                        updatePoint,
                                        deletePoint,
                                        points,
+                                       tags,
+                                       onRemoveTag,
+                                       onEditTag,
                                    }) {
     const {length, width} = robotDimensions;
     const [openSections, setOpenSections] = useState({
@@ -55,9 +58,17 @@ export default function BuildPanel({
         overlay: false,
         tags: false,
     });
+    const [expandedPoints, setExpandedPoints] = useState({});
 
     const toggleSection = (key) => {
         setOpenSections((prev) => ({...prev, [key]: !prev[key]}));
+    };
+
+    const togglePointExpansion = (pointIndex) => {
+        setExpandedPoints((prev) => ({
+            ...prev,
+            [pointIndex]: !prev[pointIndex]
+        }));
     };
 
     const handleToggleKey = (event, key) => {
@@ -66,6 +77,16 @@ export default function BuildPanel({
             toggleSection(key);
         }
     };
+
+    // Group tags by point index
+    const tagsByPoint = tags.reduce((acc, tag, index) => {
+        const pointIndex = tag.index - 1; // Convert to 0-based
+        if (!acc[pointIndex]) {
+            acc[pointIndex] = [];
+        }
+        acc[pointIndex].push({...tag, originalIndex: index});
+        return acc;
+    }, {});
 
     return (
         <aside className="panel panel-build">
@@ -270,7 +291,7 @@ export default function BuildPanel({
                         onKeyDown={(event) => handleToggleKey(event, "motion")}
                     >
                         <div>
-                            <h3>Motion &amp; Placement</h3>
+                            <h3>Motion & Placement</h3>
                             <p>Match drivetrain performance and snapping preferences.</p>
                         </div>
                         <span className="collapse-caret">{openSections.motion ? "▾" : "▸"}</span>
@@ -368,60 +389,146 @@ export default function BuildPanel({
                         <span className="collapse-caret">{openSections.tags ? "▾" : "▸"}</span>
                     </div>
                     {openSections.tags && (
-                        <>
-                            <div className="field-grid" id="tags-card">
-                                <Field label="Tag Type">
-                                    <select value={tagName} onChange={(event) => {
-                                        const selectedName = event.target.value;
-                                        setTagName(selectedName);
-                                        // Set default values based on tag type
-                                        const defaults = {
-                                            velocity: 50,
-                                            pause: 1,
-                                            intake: 0,
-                                            autoAimRed: 0,
-                                            autoAimBlue: 0,
-                                            shooterVelocity: 0,
-                                            hoodAngle: 0,
-                                            launchArtifacts: 1,
-                                        };
-                                        if (defaults[selectedName] !== undefined) {
-                                            setTagValue(defaults[selectedName]);
-                                        }
-                                    }}>
-                                        <option value="">-- Custom --</option>
-                                        <option value="velocity">velocity - Change robot velocity (in/s)</option>
-                                        <option value="pause">pause - Pause at point (seconds)</option>
-                                        <option value="intake">intake - Control intake motor</option>
-                                        <option value="autoAimRed">autoAimRed - Auto-aim for red alliance</option>
-                                        <option value="autoAimBlue">autoAimBlue - Auto-aim for blue alliance</option>
-                                        <option value="shooterVelocity">shooterVelocity - Set shooter velocity</option>
-                                        <option value="hoodAngle">hoodAngle - Set hood angle (degrees)</option>
-                                        <option value="launchArtifacts">launchArtifacts - Launch/shoot (seconds)</option>
-                                    </select>
-                                </Field>
-                                <Field label="Value">
-                                    <input type="number" step={0.1} placeholder="0" value={tagValue} onChange={(event) => setTagValue(event.target.value)} />
-                                </Field>
-                                <Field label="Point Index">
-                                    <input
-                                        type="number"
-                                        min={1}
-                                        max={pointsLength}
-                                        step={1}
-                                        placeholder={pointsLength}
-                                        value={tagPointIndex || pointsLength}
-                                        onChange={(event) => setTagPointIndex(event.target.value)}
-                                    />
-                                </Field>
-                            </div>
-                            <p className="helper-text">Point index: 1 = first point, {pointsLength} = last point</p>
-                            <div className="card-actions">
-                                <button className="btn pill" onClick={addTag} disabled={pointsLength === 0 || !tagName.trim()}>
-                                    Add Tag
-                                </button>
-                            </div>
-                        </>
+                        <div id="tags-card">
+                            {points.length === 0 ? (
+                                <p className="helper-text">Add points to the path to create tags</p>
+                            ) : (
+                                <>
+                                    {points.map((point, pointIndex) => {
+                                const pointTags = tagsByPoint[pointIndex] || [];
+                                const isExpanded = expandedPoints[pointIndex];
+
+                                return (
+                                    <div key={pointIndex} className="point-section">
+                                        <div
+                                            className="point-header"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-expanded={isExpanded}
+                                            onClick={() => togglePointExpansion(pointIndex)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === "Enter" || event.key === " ") {
+                                                    event.preventDefault();
+                                                    togglePointExpansion(pointIndex);
+                                                }
+                                            }}
+                                        >
+                                            <div>
+                                                <h4>Point {pointIndex + 1}</h4>
+                                                <p>({point.x?.toFixed(1) || "0"}, {point.y?.toFixed(1) || "0"}){point.h !== undefined ? ` • ${point.h}°` : ""}</p>
+                                                {pointTags.length > 0 && (
+                                                    <p className="tag-count">{pointTags.length} tag{pointTags.length !== 1 ? 's' : ''}</p>
+                                                )}
+                                            </div>
+                                            <span className="collapse-caret">{isExpanded ? "▾" : "▸"}</span>
+                                        </div>
+
+                                        {isExpanded && (
+                                            <div className="point-tags-content">
+                                                {pointTags.length > 0 ? (
+                                                    <div className="point-tag-list">
+                                                        {pointTags.map((tag) => (
+                                                            <div key={tag.originalIndex} className="point-tag-item">
+                                                                <div className="point-tag-header">
+                                                                    <div style={{flex: 1, minWidth: 0}}>
+                                                                        <span className="point-tag-name">{tag.name}</span>
+                                                                        <div className="point-tag-value">{tag.value}</div>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="point-tag-actions">
+                                                                    <button
+                                                                        className="btn ghost"
+                                                                        onClick={() => {
+                                                                            const newName = prompt("Tag name:", tag.name);
+                                                                            const newValue = prompt("Tag value:", tag.value);
+                                                                            if (newName && onEditTag) {
+                                                                                onEditTag(tag.originalIndex, newName, Number(newValue) || 0, tag.index);
+                                                                            }
+                                                                        }}
+                                                                    >
+                                                                        Edit
+                                                                    </button>
+                                                                    {onRemoveTag && (
+                                                                        <button
+                                                                            className="btn danger"
+                                                                            onClick={() => onRemoveTag(tag.originalIndex)}
+                                                                        >
+                                                                            Delete
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    <p className="helper-text">No tags for this point</p>
+                                                )}
+
+                                                <div className="field-grid">
+                                                    <Field label="Tag Type">
+                                                        <select 
+                                                            value={tagName} 
+                                                            onChange={(event) => {
+                                                                const selectedName = event.target.value;
+                                                                setTagName(selectedName);
+                                                                // Set default values based on tag type
+                                                                const defaults = {
+                                                                    velocity: 50,
+                                                                    pause: 1,
+                                                                    intake: 0,
+                                                                    autoAimRed: 0,
+                                                                    autoAimBlue: 0,
+                                                                    shooterVelocity: 0,
+                                                                    hoodAngle: 0,
+                                                                    launchArtifacts: 1,
+                                                                };
+                                                                if (defaults[selectedName] !== undefined) {
+                                                                    setTagValue(defaults[selectedName]);
+                                                                }
+                                                            }}
+                                                        >
+                                                            <option value="">-- Select Type --</option>
+                                                            <option value="velocity">velocity - Robot speed (in/s)</option>
+                                                            <option value="pause">pause - Pause duration (sec)</option>
+                                                            <option value="intake">intake - Intake control</option>
+                                                            <option value="autoAimRed">autoAimRed - Red alliance aim</option>
+                                                            <option value="autoAimBlue">autoAimBlue - Blue alliance aim</option>
+                                                            <option value="shooterVelocity">shooterVelocity - Shooter speed</option>
+                                                            <option value="hoodAngle">hoodAngle - Hood angle (deg)</option>
+                                                            <option value="launchArtifacts">launchArtifacts - Launch duration (sec)</option>
+                                                        </select>
+                                                    </Field>
+                                                    <Field label="Value">
+                                                        <input 
+                                                            type="number" 
+                                                            step={0.1} 
+                                                            placeholder="0" 
+                                                            value={tagValue} 
+                                                            onChange={(event) => setTagValue(event.target.value)} 
+                                                        />
+                                                    </Field>
+                                                </div>
+                                                <button 
+                                                    className="btn primary" 
+                                                    onClick={() => {
+                                                        if (tagName.trim()) {
+                                                            setTagPointIndex(pointIndex + 1);
+                                                            addTag();
+                                                        }
+                                                    }} 
+                                                    disabled={!tagName.trim()}
+                                                    style={{width: '100%'}}
+                                                >
+                                                    Add Tag to Point {pointIndex + 1}
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                                </>
+                            )}
+                        </div>
                     )}
                 </section>
             </div>

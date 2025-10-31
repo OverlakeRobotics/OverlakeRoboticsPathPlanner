@@ -707,6 +707,9 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                 updatePoint={updatePoint}
                 deletePoint={deletePoint}
                 points={points}
+                tags={tags}
+                onRemoveTag={removeTag}
+                onEditTag={editTag}
             />
 
             {!isNarrow && (
@@ -792,6 +795,7 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                 estTimeSec={estRunTimeSeconds}
                 onExportPath={onExportPath}
                 onImportFile={onImportPath}
+                points={points}
             />
         </div>
         </div>
