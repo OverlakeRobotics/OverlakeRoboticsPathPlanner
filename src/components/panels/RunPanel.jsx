@@ -43,6 +43,7 @@ export default function RunPanel({
                                      onExportPath,
                                      onImportFile,
                                      points,
+                                     onSwitchSides,
                                  }) {
     const lengthDisplay = toFixed(totalLength, 1);
     const timeDisplay = Number.isFinite(estTimeSec) ? toFixed(estTimeSec, 1) : "0.0";
@@ -438,6 +439,25 @@ export default function RunPanel({
                         <button className="btn danger" onClick={onClear}>
                             Clear path
                         </button>
+                    </div>
+                </section>
+
+                <section className="control-card">
+                    <div className="card-header">
+                        <h3>Switch Sides</h3>
+                        <p>Mirror path between Red and Blue Alliance.</p>
+                    </div>
+                    <div className="card-actions stack">
+                        <button 
+                            className="btn callout secondary" 
+                            onClick={onSwitchSides}
+                            disabled={pointsCount === 0}
+                        >
+                            🔄 Switch Sides
+                        </button>
+                        <p className="helper-text">
+                            Flips all points vertically. Swaps autoAimRed ↔ autoAimBlue tags automatically.
+                        </p>
                     </div>
                 </section>
 

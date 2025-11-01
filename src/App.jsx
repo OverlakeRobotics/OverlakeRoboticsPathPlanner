@@ -470,6 +470,44 @@ export default function App() {
         }
     };
 
+    const switchSides = () => {
+        // Mirror all points and start pose along the Y-axis (flip Y coordinates, top-bottom)
+        // Also swap autoAimRed <-> autoAimBlue tags
+        
+        // Mirror start pose
+        setStartPose((prev) => {
+            const newH = -prev.h; // Flip heading vertically
+            return {
+                ...prev,
+                y: -prev.y,
+                h: normDeg(newH), // Mirror heading angle and normalize
+            };
+        });
+
+        // Mirror all points
+        setPointsWithoutModal((prev) => prev.map((p) => {
+            const newH = p.h !== undefined ? -p.h : undefined;
+            return {
+                ...p,
+                y: -p.y,
+                h: newH !== undefined ? normDeg(newH) : undefined, // Mirror heading angle and normalize
+            };
+        }));
+
+        // Swap autoAimRed <-> autoAimBlue tags
+        setTags((prev) => prev.map((tag) => {
+            if (tag.name === "autoAimRed") {
+                return { ...tag, name: "autoAimBlue" };
+            } else if (tag.name === "autoAimBlue") {
+                return { ...tag, name: "autoAimRed" };
+            }
+            return tag;
+        }));
+
+        // Stop playback when switching sides
+        stopPlayback();
+    };
+
     const triggerCopiedFeedback = () => {
         setCopied(true);
         window.setTimeout(() => setCopied(false), 1600);
@@ -796,6 +834,7 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                 onExportPath={onExportPath}
                 onImportFile={onImportPath}
                 points={points}
+                onSwitchSides={switchSides}
             />
         </div>
         </div>
