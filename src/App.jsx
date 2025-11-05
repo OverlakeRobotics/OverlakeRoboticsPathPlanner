@@ -6,6 +6,7 @@ import CanvasStage from "./components/CanvasStage";
 import BuildPanel from "./components/panels/BuildPanel";
 import RunPanel from "./components/panels/RunPanel";
 import TagModal from "./components/TagModal";
+import ExportModal from "./components/ExportModal";
 import {
     DEFAULT_CANVAS_SIZE,
     DEFAULT_MAX_ACCEL_IN_PER_S2,
@@ -197,6 +198,7 @@ export default function App() {
     const [tagPointIndex, setTagPointIndex] = useState(""); // Index for manual tag placement
     const [showTagModal, setShowTagModal] = useState(false);
     const [pendingTagPointIndex, setPendingTagPointIndex] = useState(null);
+    const [showExportModal, setShowExportModal] = useState(false);
 
     const [shapeType, setShapeType] = useState("line");
     const [headingMode, setHeadingMode] = useState("straight");
@@ -616,12 +618,17 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
     });
 
     const onExportPath = () => {
+        setShowExportModal(true);
+    };
+
+    const handleExportWithName = (fileName) => {
+        const cleanedName = fileName.replace(/\.json$/i, '') + '.json';
         const obj = buildSerializable();
         const blob = new Blob([JSON.stringify(obj, null, 2)], {type: "application/json"});
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `ftc_path_${Date.now()}.json`;
+        a.download = cleanedName;
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -693,6 +700,11 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
             onAddTag={addTagFromModal}
             pointIndex={pendingTagPointIndex}
             pointsCount={points.length}
+        />
+        <ExportModal
+            isOpen={showExportModal}
+            onClose={() => setShowExportModal(false)}
+            onExport={handleExportWithName}
         />
         <div className="app-shell" ref={layoutRef} style={shellStyle}>
             <BuildPanel
