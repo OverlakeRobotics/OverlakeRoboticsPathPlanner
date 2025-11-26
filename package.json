@@ -6,7 +6,6 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "build:offline": "vite build && node scripts/make-offline-bundle.mjs",
     "preview": "vite preview",
     "lint": "eslint ."
   },
