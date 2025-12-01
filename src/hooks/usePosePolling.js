@@ -7,7 +7,7 @@ const parseRobotState = (payload) => {
     return null;
 };
 
-export const usePosePolling = ({enabled = true, interval = POSE_POLL_INTERVAL_MS} = {}) => {
+export const usePosePolling = ({enabled = true, interval = POSE_POLL_INTERVAL_MS, hubUrl = HUB_POSE_URL} = {}) => {
     const [pose, setPose] = useState(null);
     const [robotState, setRobotState] = useState(null);
     const timerRef = useRef(null);
@@ -18,7 +18,7 @@ export const usePosePolling = ({enabled = true, interval = POSE_POLL_INTERVAL_MS
 
         const poll = async () => {
             try {
-                const res = await fetch(HUB_POSE_URL, {cache: "no-store"});
+                const res = await fetch(hubUrl, {cache: "no-store"});
                 if (res.ok) {
                     const json = await res.json();
                     if (!cancelled && json?.ok) {
@@ -38,7 +38,7 @@ export const usePosePolling = ({enabled = true, interval = POSE_POLL_INTERVAL_MS
             cancelled = true;
             if (timerRef.current) window.clearTimeout(timerRef.current);
         };
-    }, [enabled, interval]);
+    }, [enabled, interval, hubUrl]);
 
     return {livePose: pose, robotState};
 };

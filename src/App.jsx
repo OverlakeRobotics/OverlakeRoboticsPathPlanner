@@ -7,6 +7,7 @@ import BuildPanel from "./components/panels/BuildPanel";
 import RunPanel from "./components/panels/RunPanel";
 import TagModal from "./components/TagModal";
 import ExportModal from "./components/ExportModal";
+import SetupModal from "./components/SetupModal";
 import {
     DEFAULT_CANVAS_SIZE,
     DEFAULT_MAX_ACCEL_IN_PER_S2,
@@ -20,8 +21,14 @@ import {
     MIN_LEFT_PANEL_WIDTH,
     MIN_RIGHT_PANEL_WIDTH,
     GRID_DEFAULT_STEP,
-    HUB_POINTS_URL,
-    HUB_RUN_URL,
+    HUB_IP,
+    FIELD_SIZE_IN,
+    PATH_COLOR,
+    START_COLOR,
+    WAYPOINT_COLOR,
+    FOOTPRINT_FILL,
+    LIVE_POSE_FILL,
+    PREVIEW_FILL,
     EPS,
     LIVE_POSE_SYNC_PREFIX,
     SPEED_PROFILE_SAMPLE_STEP_IN,
@@ -30,6 +37,7 @@ import {
 } from "./constants/config";
 import {usePosePolling} from "./hooks/usePosePolling";
 import {usePlayback} from "./hooks/usePlayback";
+import {useTheme} from "./hooks/useTheme";
 import {clamp, num, normDeg, toFixed} from "./utils/math";
 import {polylineLength} from "./utils/path";
 
@@ -161,6 +169,62 @@ export default function App() {
     const rightWidthRef = useRef(rightWidth);
     const [isNarrow, setIsNarrow] = useState(false);
 
+    // Settings State
+    const [showSetupModal, setShowSetupModal] = useState(false);
+    const [hubIp, setHubIp] = useState(HUB_IP);
+    const [fieldSize, setFieldSize] = useState(FIELD_SIZE_IN);
+    const [palette, setPalette] = useState({
+        path: PATH_COLOR,
+        start: START_COLOR,
+        waypoint: WAYPOINT_COLOR,
+        footprint: FOOTPRINT_FILL,
+        livePose: LIVE_POSE_FILL,
+        preview: PREVIEW_FILL
+    });
+    
+    // UI Effects State
+    const [themeName, setThemeName] = useState("default");
+    const [blurStrength, setBlurStrength] = useState(16);
+    const [panelOpacity, setPanelOpacity] = useState(0.85);
+    const [cardOpacity, setCardOpacity] = useState(0.6);
+    const [uiScale, setUiScale] = useState(0.8);
+    
+    // Apply theme settings via hook
+    useTheme({ blurStrength, panelOpacity, cardOpacity, uiScale, palette, themeName });
+
+    useEffect(() => {
+        const stored = localStorage.getItem("planner_settings");
+        if (stored) {
+            try {
+                const parsed = JSON.parse(stored);
+                if (parsed.hubIp) setHubIp(parsed.hubIp);
+                if (parsed.fieldSize) setFieldSize(parsed.fieldSize);
+                if (parsed.palette) setPalette(parsed.palette);
+                if (parsed.themeName) setThemeName(parsed.themeName);
+                if (parsed.blurStrength !== undefined) setBlurStrength(parsed.blurStrength);
+                if (parsed.panelOpacity !== undefined) setPanelOpacity(parsed.panelOpacity);
+                if (parsed.cardOpacity !== undefined) setCardOpacity(parsed.cardOpacity);
+                if (parsed.uiScale !== undefined) setUiScale(parsed.uiScale);
+            } catch (e) {
+                console.error("Failed to parse settings", e);
+            }
+        } else {
+            setShowSetupModal(true);
+        }
+    }, []);
+
+    const handleSaveSettings = (settings) => {
+        setHubIp(settings.hubIp);
+        setFieldSize(settings.fieldSize);
+        setPalette(settings.palette);
+        setThemeName(settings.themeName);
+        setBlurStrength(settings.blurStrength);
+        setPanelOpacity(settings.panelOpacity);
+        setCardOpacity(settings.cardOpacity);
+        setUiScale(settings.uiScale);
+        localStorage.setItem("planner_settings", JSON.stringify(settings));
+    };
+
     const [startPose, setStartPose] = useState({x: 0, y: 0, h: 0});
     const [placeStart, setPlaceStart] = useState(false);
 
@@ -169,7 +233,7 @@ export default function App() {
     const [shouldShowTagModal, setShouldShowTagModal] = useState(true);
 
     // Point editing state
-    const [selectedPointIndex, setSelectedPointIndex] = useState(null);
+    const [selectedPointIndices, setSelectedPointIndices] = useState([]); // Now an array for multi-selection
     const [editMode, setEditMode] = useState(false); // When true, enable point editing
 
     const setPoints = useCallback((updater) => {
@@ -228,7 +292,9 @@ export default function App() {
     const runTimerRef = useRef(null);
     const undoRef = useRef(() => {});
 
-    const {livePose, robotState} = usePosePolling();
+    const {livePose, robotState} = usePosePolling({
+        hubUrl: `http://${hubIp}:8099/pose`
+    });
 
     useEffect(() => {
         const img = new Image();
@@ -455,9 +521,26 @@ export default function App() {
         });
     };
 
+    // Update multiple points at once (for multi-selection drag)
+    const updatePoints = (indices, deltaX, deltaY) => {
+        setPoints((prev) => {
+            const updated = [...prev];
+            indices.forEach(index => {
+                if (updated[index]) {
+                    updated[index] = {
+                        ...updated[index],
+                        x: updated[index].x + deltaX,
+                        y: updated[index].y + deltaY,
+                    };
+                }
+            });
+            return updated;
+        });
+    };
+
     const deletePoint = (index) => {
         setPoints((prev) => prev.filter((_, i) => i !== index));
-        setSelectedPointIndex(null);
+        setSelectedPointIndices(prev => prev.filter(i => i !== index).map(i => i > index ? i - 1 : i));
         // Update tags that reference points after the deleted one
         setTags((prev) => prev
             .filter(tag => tag.index !== index + 1) // Remove tags for deleted point
@@ -465,10 +548,27 @@ export default function App() {
         );
     };
 
+    // Delete multiple selected points
+    const deletePoints = (indices) => {
+        const sortedIndices = [...indices].sort((a, b) => b - a); // Sort descending
+        setPoints((prev) => prev.filter((_, i) => !indices.includes(i)));
+        setSelectedPointIndices([]);
+        // Update tags
+        setTags((prev) => {
+            let updatedTags = [...prev];
+            sortedIndices.forEach(index => {
+                updatedTags = updatedTags
+                    .filter(tag => tag.index !== index + 1)
+                    .map(tag => tag.index > index + 1 ? {...tag, index: tag.index - 1} : tag);
+            });
+            return updatedTags;
+        });
+    };
+
     const toggleEditMode = () => {
         setEditMode(prev => !prev);
         if (editMode) {
-            setSelectedPointIndex(null);
+            setSelectedPointIndices([]);
         }
     };
 
@@ -534,7 +634,7 @@ export default function App() {
             tolerance: Number(tolerance) || 0,
             tags: tags.map((tag) => ({index: Number(tag.index) || 0, name: String(tag.name || ""), value: Number(tag.value) || 0})),
         };
-        fetch(HUB_POINTS_URL, {
+        fetch(`http://${hubIp}:8099/points`, {
             method: "POST",
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify(payload),
@@ -552,7 +652,7 @@ export default function App() {
     const doRun = () => {
         if (runTimerRef.current) clearTimeout(runTimerRef.current);
         setRunStatus("sending");
-        fetch(HUB_RUN_URL, {
+        fetch(`http://${hubIp}:8099/run`, {
             method: "POST",
         })
             .then((response) => {
@@ -694,6 +794,21 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
 
     return (
         <div className="app-scale">
+        <SetupModal
+            isOpen={showSetupModal}
+            onClose={() => setShowSetupModal(false)}
+            onSave={handleSaveSettings}
+            initialSettings={{ 
+                hubIp, 
+                fieldSize, 
+                palette,
+                themeName,
+                blurStrength,
+                panelOpacity,
+                cardOpacity,
+                uiScale
+            }}
+        />
         <TagModal
             isOpen={showTagModal}
             onClose={() => setShowTagModal(false)}
@@ -753,13 +868,16 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                 pointsLength={points.length}
                 editMode={editMode}
                 toggleEditMode={toggleEditMode}
-                selectedPointIndex={selectedPointIndex}
+                selectedPointIndices={selectedPointIndices}
+                setSelectedPointIndices={setSelectedPointIndices}
                 updatePoint={updatePoint}
                 deletePoint={deletePoint}
+                deletePoints={deletePoints}
                 points={points}
                 tags={tags}
                 onRemoveTag={removeTag}
                 onEditTag={editTag}
+                onOpenSettings={() => setShowSetupModal(true)}
             />
 
             {!isNarrow && (
@@ -804,9 +922,13 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                     waypoints={waypoints}
                     previewMarker="dotArrow"
                     editMode={editMode}
-                    selectedPointIndex={selectedPointIndex}
-                    setSelectedPointIndex={setSelectedPointIndex}
+                    selectedPointIndices={selectedPointIndices}
+                    setSelectedPointIndices={setSelectedPointIndices}
                     updatePoint={updatePoint}
+                    updatePoints={updatePoints}
+                    deletePoints={deletePoints}
+                    palette={palette}
+                    fieldSize={fieldSize}
                 />
             </div>
 

@@ -1,20 +1,12 @@
 import {
-    FIELD_SIZE_IN,
     FIELD_EDGE_IN,
-    PATH_COLOR,
-    START_COLOR,
-    WAYPOINT_COLOR,
-    LAST_POINT_COLOR,
-    FOOTPRINT_FILL,
-    LIVE_POSE_FILL,
-    PREVIEW_FILL,
-    DRAW_RAW_COLOR,
-    DRAW_FIT_COLOR,
-    DRAW_LABEL_FILL,
-    DRAW_LABEL_STROKE,
     MIN_DRAW_SAMPLE_SPACING_IN,
     MIN_DRAW_SEGMENT_LEN_IN,
     DRAW_SIMPLIFY_TOLERANCE_IN,
+    DRAW_LABEL_FILL,
+    DRAW_LABEL_STROKE,
+    DRAW_RAW_COLOR,
+    DRAW_FIT_COLOR,
 } from "../constants/config";
 import {headingVector, perpendicularHeading} from "./geometry";
 import {canvasToWorld, headingFromDelta, rotateLocalToWorld, snapToField, worldToCanvas} from "./geometry";
@@ -60,30 +52,34 @@ export const drawPlannerScene = ({
     playDist,
     waypoints,
     drawTemp,
-    selectedPointIndex,
+    selectedPointIndices,
     editMode,
+    palette,
+    fieldSize,
+    zoom,
+    marquee,
 }) => {
     if (!canvasCtx || !overlayCtx) return;
 
     canvasCtx.clearRect(0, 0, canvasSize, canvasSize);
     if (backgroundImage && backgroundImage.complete) {
-        const scale = Math.max(canvasSize / backgroundImage.width, canvasSize / backgroundImage.height);
+        const scale = Math.max(canvasSize / backgroundImage.width, canvasSize / backgroundImage.height) * (zoom || 1);
         const dw = backgroundImage.width * scale;
         const dh = backgroundImage.height * scale;
-        const dx = (canvasSize - dw) / 2;
-        const dy = (canvasSize - dh) / 2;
+        const dx = center.x - dw / 2;
+        const dy = center.y - dh / 2;
         canvasCtx.drawImage(backgroundImage, dx, dy, dw, dh);
     } else {
         canvasCtx.fillStyle = "#0e1733";
         canvasCtx.fillRect(0, 0, canvasSize, canvasSize);
     }
 
-    if (showGrid && gridStep > 0) drawGrid(canvasCtx, gridStep, center, ppi, canvasSize);
-    drawPath(canvasCtx, startPose, points, center, ppi);
+    if (showGrid && gridStep > 0) drawGrid(canvasCtx, gridStep, center, ppi, canvasSize, fieldSize);
+    drawPath(canvasCtx, startPose, points, center, ppi, palette);
 
     overlayCtx.clearRect(0, 0, canvasSize, canvasSize);
-    drawStartMarker(overlayCtx, startPose, center, ppi, placeStart, robot);
-    drawWaypoints(overlayCtx, points, center, ppi, robot, selectedPointIndex, editMode);
+    drawStartMarker(overlayCtx, startPose, center, ppi, placeStart, robot, palette);
+    drawWaypoints(overlayCtx, points, center, ppi, robot, selectedPointIndices, editMode, palette);
     drawPreview(overlayCtx, {
         preview,
         startPose,
@@ -97,6 +93,7 @@ export const drawPlannerScene = ({
         shapeType,
         bezierTemp,
         arcTemp,
+        palette,
     });
     drawDrawOverlay(overlayCtx, {drawTemp, center, ppi});
     drawPlayback(overlayCtx, {
@@ -108,23 +105,47 @@ export const drawPlannerScene = ({
         center,
         ppi,
         robot,
+        palette,
     });
-    drawLivePose(overlayCtx, livePose, center, ppi, robot);
+    drawLivePose(overlayCtx, livePose, center, ppi, robot, palette);
+    
+    // Draw marquee selection box
+    if (marquee) {
+        drawMarquee(overlayCtx, marquee);
+    }
 };
 
-const drawGrid = (ctx, step, center, ppi, canvasSize) => {
+const drawMarquee = (ctx, marquee) => {
+    ctx.save();
+    ctx.strokeStyle = "#5cd2ff";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 5]);
+    ctx.fillStyle = "rgba(92, 210, 255, 0.1)";
+    
+    const x = Math.min(marquee.startX, marquee.endX);
+    const y = Math.min(marquee.startY, marquee.endY);
+    const w = Math.abs(marquee.endX - marquee.startX);
+    const h = Math.abs(marquee.endY - marquee.startY);
+    
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeRect(x, y, w, h);
+    ctx.setLineDash([]);
+    ctx.restore();
+};
+
+const drawGrid = (ctx, step, center, ppi, canvasSize, fieldSize) => {
     const spacing = Math.max(0.1, step);
     ctx.save();
     ctx.lineWidth = 1;
     ctx.strokeStyle = "#334155";
-    for (let y = -FIELD_SIZE_IN / 2; y <= FIELD_SIZE_IN / 2 + 1e-6; y += spacing) {
+    for (let y = -fieldSize / 2; y <= fieldSize / 2 + 1e-6; y += spacing) {
         const {cx} = worldToCanvas(0, y, center.x, center.y, ppi);
         ctx.beginPath();
         ctx.moveTo(cx, 0);
         ctx.lineTo(cx, canvasSize);
         ctx.stroke();
     }
-    for (let x = -FIELD_SIZE_IN / 2; x <= FIELD_SIZE_IN / 2 + 1e-6; x += spacing) {
+    for (let x = -fieldSize / 2; x <= fieldSize / 2 + 1e-6; x += spacing) {
         const {cy} = worldToCanvas(x, 0, center.x, center.y, ppi);
         ctx.beginPath();
         ctx.moveTo(0, cy);
@@ -134,12 +155,12 @@ const drawGrid = (ctx, step, center, ppi, canvasSize) => {
     ctx.restore();
 };
 
-const drawPath = (ctx, startPose, points, center, ppi) => {
+const drawPath = (ctx, startPose, points, center, ppi, palette) => {
     if (!points.length) return;
     ctx.save();
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
-    ctx.strokeStyle = PATH_COLOR;
+    ctx.strokeStyle = palette.path;
     ctx.lineWidth = 3;
     const start = worldToCanvas(num(startPose.x), num(startPose.y), center.x, center.y, ppi);
     ctx.beginPath();
@@ -152,18 +173,18 @@ const drawPath = (ctx, startPose, points, center, ppi) => {
     ctx.restore();
 };
 
-const drawStartMarker = (ctx, startPose, center, ppi, placingStart, robot) => {
+const drawStartMarker = (ctx, startPose, center, ppi, placingStart, robot, palette) => {
     if (placingStart) return;
     const sx = num(startPose.x);
     const sy = num(startPose.y);
     const sh = normDeg(num(startPose.h));
     drawFootprint(ctx, sx, sy, sh, robot.length, robot.width, {
-        fill: START_COLOR,
+        fill: palette.start,
         stroke: "#ffc14b",
         alpha: 0.12,
     }, center, ppi);
     const {cx, cy} = worldToCanvas(sx, sy, center.x, center.y, ppi);
-    drawMarker(ctx, cx, cy, START_COLOR, sh);
+    drawMarker(ctx, cx, cy, palette.start, sh);
 };
 
 const drawMarker = (ctx, cx, cy, color, heading) => {
@@ -179,14 +200,16 @@ const drawMarker = (ctx, cx, cy, color, heading) => {
     ctx.restore();
 };
 
-const drawWaypoints = (ctx, points, center, ppi, robot, selectedPointIndex, editMode) => {
+const drawWaypoints = (ctx, points, center, ppi, robot, selectedPointIndices, editMode, palette) => {
     ctx.save();
+    const selectedSet = new Set(selectedPointIndices || []);
+    
     points.forEach((point, index) => {
         const heading = num(point.h ?? 0);
         const {cx, cy} = worldToCanvas(point.x, point.y, center.x, center.y, ppi);
 
-        // Highlight selected point in edit mode
-        const isSelected = editMode && selectedPointIndex === index;
+        // Highlight selected points in edit mode
+        const isSelected = editMode && selectedSet.has(index);
 
         if (isSelected) {
             // Draw selection ring
@@ -195,23 +218,35 @@ const drawWaypoints = (ctx, points, center, ppi, robot, selectedPointIndex, edit
             ctx.beginPath();
             ctx.arc(cx, cy, 12, 0, Math.PI * 2);
             ctx.stroke();
+
+            // Draw footprint for selected point
+            drawFootprint(ctx, point.x, point.y, heading, robot.length, robot.width, {
+                fill: "#5cd2ff",
+                stroke: "#5cd2ff",
+                alpha: 0.12,
+            }, center, ppi);
         }
 
-        ctx.fillStyle = isSelected ? "#5cd2ff" : (index === points.length - 1 ? LAST_POINT_COLOR : WAYPOINT_COLOR);
+        ctx.fillStyle = isSelected ? "#5cd2ff" : (index === points.length - 1 ? "#ffffff" : palette.waypoint);
         ctx.beginPath();
         ctx.arc(cx, cy, isSelected ? 7 : 5, 0, Math.PI * 2);
         ctx.fill();
 
         const arrow = headingVector(heading, 18);
-        drawArrow(ctx, cx, cy, cx + arrow.dx, cy + arrow.dy, isSelected ? "#5cd2ff" : FOOTPRINT_FILL);
+        drawArrow(ctx, cx, cy, cx + arrow.dx, cy + arrow.dy, isSelected ? "#5cd2ff" : palette.footprint);
     });
+    
+    // Always draw footprint for the last point if not already drawn (selected)
     if (points.length) {
-        const last = points[points.length - 1];
-        drawFootprint(ctx, last.x, last.y, num(last.h ?? 0), robot.length, robot.width, {
-            fill: "#7aa2ff",
-            stroke: "#7aa2ff",
-            alpha: 0.12,
-        }, center, ppi);
+        const lastIndex = points.length - 1;
+        if (!selectedSet.has(lastIndex)) {
+            const last = points[lastIndex];
+            drawFootprint(ctx, last.x, last.y, num(last.h ?? 0), robot.length, robot.width, {
+                fill: "#7aa2ff",
+                stroke: "#7aa2ff",
+                alpha: 0.12,
+            }, center, ppi);
+        }
     }
     ctx.restore();
 };
@@ -229,6 +264,7 @@ const drawPreview = (ctx, {
     shapeType,
     bezierTemp,
     arcTemp,
+    palette,
 }) => {
     const sx = num(startPose.x);
     const sy = num(startPose.y);
@@ -238,11 +274,11 @@ const drawPreview = (ctx, {
     if (placeStart && preview) {
         const heading = num(preview.h ?? sh);
         drawFootprint(ctx, preview.x, preview.y, heading, robot.length, robot.width, {
-            fill: START_COLOR,
+            fill: palette.start,
             stroke: "#ffc14b",
             alpha: 0.16,
         }, center, ppi);
-        drawPreviewMarker(ctx, preview, center, ppi, START_COLOR, heading);
+        drawPreviewMarker(ctx, preview, center, ppi, palette.start, heading);
         return;
     }
 
@@ -269,6 +305,7 @@ const drawPreview = (ctx, {
             robot,
             headingMode,
             endHeading,
+            palette,
         });
         return;
     }
@@ -296,13 +333,14 @@ const drawPreview = (ctx, {
             robot,
             headingMode,
             endHeading,
+            palette,
         });
         return;
     }
 
     if (!preview) return;
 
-    drawStraightPreview(ctx, anchor, preview, center, ppi, robot);
+    drawStraightPreview(ctx, anchor, preview, center, ppi, robot, palette);
 };
 
 const drawPreviewMarker = (ctx, preview, center, ppi, color, heading) => {
@@ -318,7 +356,7 @@ const drawPreviewMarker = (ctx, preview, center, ppi, color, heading) => {
     ctx.restore();
 };
 
-const drawCurvedPreview = (ctx, {samples, anchor, end, center, ppi, robot, headingMode, endHeading}) => {
+const drawCurvedPreview = (ctx, {samples, anchor, end, center, ppi, robot, headingMode, endHeading, palette}) => {
     if (!samples?.length) return;
     ctx.save();
     ctx.setLineDash([8, 6]);
@@ -337,17 +375,17 @@ const drawCurvedPreview = (ctx, {samples, anchor, end, center, ppi, robot, headi
     const tangent = last?.tangent ?? {dx: end.x - anchor.x, dy: end.y - anchor.y};
     const heading = resolvePreviewHeading(headingMode, tangent, endHeading, anchor);
     drawFootprint(ctx, end.x, end.y, heading, robot.length, robot.width, {
-        fill: PREVIEW_FILL,
-        stroke: PREVIEW_FILL,
+        fill: palette.preview,
+        stroke: palette.preview,
         alpha: 0.1,
     }, center, ppi);
     const pos = worldToCanvas(end.x, end.y, center.x, center.y, ppi);
     const arrow = headingVector(heading, 18);
-    drawArrow(ctx, pos.cx, pos.cy, pos.cx + arrow.dx, pos.cy + arrow.dy, PREVIEW_FILL);
+    drawArrow(ctx, pos.cx, pos.cy, pos.cx + arrow.dx, pos.cy + arrow.dy, palette.preview);
     ctx.restore();
 };
 
-const drawStraightPreview = (ctx, anchor, preview, center, ppi, robot) => {
+const drawStraightPreview = (ctx, anchor, preview, center, ppi, robot, palette) => {
     ctx.save();
     ctx.setLineDash([8, 6]);
     ctx.strokeStyle = "#94a3b8";
@@ -360,12 +398,12 @@ const drawStraightPreview = (ctx, anchor, preview, center, ppi, robot) => {
     ctx.stroke();
     ctx.setLineDash([]);
     drawFootprint(ctx, preview.x, preview.y, preview.h, robot.length, robot.width, {
-        fill: PREVIEW_FILL,
-        stroke: PREVIEW_FILL,
+        fill: palette.preview,
+        stroke: palette.preview,
         alpha: 0.1,
     }, center, ppi);
     const arrow = headingVector(preview.h, 18);
-    drawArrow(ctx, end.cx, end.cy, end.cx + arrow.dx, end.cy + arrow.dy, PREVIEW_FILL);
+    drawArrow(ctx, end.cx, end.cy, end.cx + arrow.dx, end.cy + arrow.dy, palette.preview);
     ctx.restore();
 };
 
@@ -459,23 +497,23 @@ const drawDrawCursor = (ctx, cursorWorld, center, ppi, active) => {
     ctx.restore();
 };
 
-const drawPlayback = (ctx, {playState, playDist, waypoints, startPose, points, center, ppi, robot}) => {
+const drawPlayback = (ctx, {playState, playDist, waypoints, startPose, points, center, ppi, robot, palette}) => {
     if (playState === "stopped" || !points.length) return;
     const progress = getSegmentProgress(waypoints, playDist);
     if (!progress) return;
     const {pos, i, t} = progress;
     const heading = interpolateHeading(i, t, startPose, points);
     drawFootprint(ctx, pos.x, pos.y, heading, robot.length, robot.width, {
-        fill: FOOTPRINT_FILL,
-        stroke: FOOTPRINT_FILL,
+        fill: palette.footprint,
+        stroke: palette.footprint,
         alpha: 0.16,
     }, center, ppi);
     const canvasPos = worldToCanvas(pos.x, pos.y, center.x, center.y, ppi);
     const arrow = headingVector(heading, 22);
-    drawArrow(ctx, canvasPos.cx, canvasPos.cy, canvasPos.cx + arrow.dx, canvasPos.cy + arrow.dy, FOOTPRINT_FILL);
+    drawArrow(ctx, canvasPos.cx, canvasPos.cy, canvasPos.cx + arrow.dx, canvasPos.cy + arrow.dy, palette.footprint);
     ctx.save();
     ctx.fillStyle = "#ffffff";
-    ctx.strokeStyle = FOOTPRINT_FILL;
+    ctx.strokeStyle = palette.footprint;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(canvasPos.cx, canvasPos.cy, 3, 0, Math.PI * 2);
@@ -484,12 +522,12 @@ const drawPlayback = (ctx, {playState, playDist, waypoints, startPose, points, c
     ctx.restore();
 };
 
-const drawLivePose = (ctx, livePose, center, ppi, robot) => {
+const drawLivePose = (ctx, livePose, center, ppi, robot, palette) => {
     if (!livePose) return;
     const heading = num(livePose.h ?? 0);
     drawFootprint(ctx, livePose.x, livePose.y, heading, robot.length, robot.width, {
-        fill: LIVE_POSE_FILL,
-        stroke: LIVE_POSE_FILL,
+        fill: palette.livePose,
+        stroke: palette.livePose,
         alpha: 0.18,
     }, center, ppi);
     const pos = worldToCanvas(livePose.x, livePose.y, center.x, center.y, ppi);
@@ -497,7 +535,7 @@ const drawLivePose = (ctx, livePose, center, ppi, robot) => {
     drawArrow(ctx, pos.cx, pos.cy, pos.cx + arrow.dx, pos.cy + arrow.dy, "#ffbaf0");
     ctx.save();
     ctx.fillStyle = "#ffffff";
-    ctx.strokeStyle = LIVE_POSE_FILL;
+    ctx.strokeStyle = palette.livePose;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(pos.cx, pos.cy, 3, 0, Math.PI * 2);
@@ -620,10 +658,13 @@ const simplifyDrawStroke = (points) => {
     return simplified.length >= 2 ? simplified : spaced.slice();
 };
 
-const clampPointToField = (point) => ({
-    x: clamp(point.x, -FIELD_EDGE_IN, FIELD_EDGE_IN),
-    y: clamp(point.y, -FIELD_EDGE_IN, FIELD_EDGE_IN),
-});
+const clampPointToField = (point, fieldSize) => {
+    const edge = fieldSize / 2;
+    return {
+        x: clamp(point.x, -edge, edge),
+        y: clamp(point.y, -edge, edge),
+    };
+};
 
 const releasePointerCapture = (state) => {
     if (!state) return;
@@ -659,15 +700,27 @@ export const createCanvasInteraction = ({
     setDrawTemp,
     editMode,
     points,
-    selectedPointIndex,
-    setSelectedPointIndex,
+    selectedPointIndices,
+    setSelectedPointIndices,
     updatePoint,
+    updatePoints,
+    fieldSize,
+    zoom,
+    setMarquee,
+    marquee,
+    robot,
 }) => {
     const pointerToWorld = (clientX, clientY, rect) => {
         const cx = (clientX - rect.left) * (canvasSize / rect.width);
         const cy = (clientY - rect.top) * (canvasSize / rect.height);
         const world = canvasToWorld(cx, cy, center.x, center.y, ppi);
-        return clampPointToField(world);
+        return clampPointToField(world, fieldSize);
+    };
+    
+    const pointerToCanvas = (clientX, clientY, rect) => {
+        const cx = (clientX - rect.left) * (canvasSize / rect.width);
+        const cy = (clientY - rect.top) * (canvasSize / rect.height);
+        return {cx, cy};
     };
 
     const ensureDrawState = () => {
@@ -773,7 +826,7 @@ export const createCanvasInteraction = ({
             const dy = world.y - state.startPointer.y;
             point = {x: state.anchor.x + dx, y: state.anchor.y + dy};
         }
-        point = clampPointToField(point);
+        point = clampPointToField(point, fieldSize);
         state.cursorWorld = point;
         const raw = state.raw || [];
         if (raw.length) {
@@ -925,29 +978,80 @@ export const createCanvasInteraction = ({
     };
 
     const onPointerDown = (event) => {
-        // Check for point dragging in edit mode
-        if (editMode && points && updatePoint) {
+        // Check for marquee selection in edit mode
+        if (editMode && points && setSelectedPointIndices && setMarquee) {
             const rect = event.currentTarget.getBoundingClientRect();
             const world = pointerToWorld(event.clientX, event.clientY, rect);
+            const canvasPos = pointerToCanvas(event.clientX, event.clientY, rect);
             const clickRadius = 15 / ppi;
 
-            let closestIndex = -1;
-            let closestDist = Infinity;
+            // Find ALL points within click radius (for stacked points)
+            const nearbyPoints = [];
             points.forEach((point, index) => {
                 const dx = point.x - world.x;
                 const dy = point.y - world.y;
                 const dist = Math.sqrt(dx * dx + dy * dy);
-                if (dist < clickRadius && dist < closestDist) {
-                    closestDist = dist;
-                    closestIndex = index;
+                if (dist < clickRadius) {
+                    nearbyPoints.push({ index, dist, point });
                 }
             });
+            // Sort by distance
+            nearbyPoints.sort((a, b) => a.dist - b.dist);
 
-            if (closestIndex >= 0) {
+            // Check if clicked inside any selected point's footprint
+            let clickedOnSelectedFootprint = false;
+            if (selectedPointIndices && selectedPointIndices.length > 0 && robot) {
+                for (const index of selectedPointIndices) {
+                    const p = points[index];
+                    if (!p) continue;
+                    
+                    // Check if world point is inside rotated footprint rect
+                    const dx = world.x - p.x;
+                    const dy = world.y - p.y;
+                    const heading = num(p.h ?? 0);
+                    const cos = Math.cos(-heading);
+                    const sin = Math.sin(-heading);
+                    const rx = dx * cos - dy * sin;
+                    const ry = dx * sin + dy * cos;
+                    
+                    if (Math.abs(rx) <= robot.length / 2 && Math.abs(ry) <= robot.width / 2) {
+                        clickedOnSelectedFootprint = true;
+                        break;
+                    }
+                }
+            }
+
+            // If clicked on empty area (no specific point center clicked)
+            if (nearbyPoints.length === 0) {
+                if (clickedOnSelectedFootprint) {
+                    // Drag selection via footprint
+                    const state = ensureDrawState();
+                    state.dragging = true;
+                    state.dragPointIndex = selectedPointIndices[0]; // Use first selected point as reference
+                    state.dragStartWorld = world;
+                    
+                    if (typeof event.pointerId === "number") {
+                        try {
+                            event.currentTarget.setPointerCapture(event.pointerId);
+                            state.pointerId = event.pointerId;
+                            state.pointerTarget = event.currentTarget;
+                        } catch (e) {}
+                    }
+                    return;
+                }
+
+                // Start marquee selection (no shift needed)
                 const state = ensureDrawState();
-                state.dragging = true;
-                state.dragPointIndex = closestIndex;
-                setSelectedPointIndex(closestIndex);
+                state.marqueeStart = canvasPos;
+                state.isMarquee = true;
+                state.marqueeStartX = canvasPos.cx;
+                state.marqueeStartY = canvasPos.cy;
+                setMarquee({
+                    startX: canvasPos.cx,
+                    startY: canvasPos.cy,
+                    endX: canvasPos.cx,
+                    endY: canvasPos.cy
+                });
                 if (typeof event.pointerId === "number") {
                     try {
                         event.currentTarget.setPointerCapture(event.pointerId);
@@ -957,6 +1061,75 @@ export const createCanvasInteraction = ({
                 }
                 return;
             }
+
+            // Multiple stacked points - select all of them
+            if (nearbyPoints.length > 1) {
+                const state = ensureDrawState();
+                state.dragging = true;
+                state.dragPointIndex = nearbyPoints[0].index;
+                state.dragStartWorld = world;
+                
+                // Select all stacked points
+                const stackedIndices = nearbyPoints.map(p => p.index);
+                if (event.ctrlKey || event.metaKey) {
+                    // Add to existing selection
+                    setSelectedPointIndices(prev => [...new Set([...prev, ...stackedIndices])]);
+                } else if (event.shiftKey && selectedPointIndices.length > 0) {
+                    // Range select from last selected to all stacked
+                    setSelectedPointIndices(prev => [...new Set([...prev, ...stackedIndices])]);
+                } else {
+                    // Replace selection with all stacked points
+                    setSelectedPointIndices(stackedIndices);
+                }
+                
+                if (typeof event.pointerId === "number") {
+                    try {
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                        state.pointerId = event.pointerId;
+                        state.pointerTarget = event.currentTarget;
+                    } catch (e) {}
+                }
+                return;
+            }
+
+            // Single point - point dragging
+            const closestIndex = nearbyPoints[0].index;
+            const state = ensureDrawState();
+            state.dragging = true;
+            state.dragPointIndex = closestIndex;
+            state.dragStartWorld = world;
+            
+            // Handle selection
+            if (event.ctrlKey || event.metaKey) {
+                // Toggle selection with Ctrl/Cmd click
+                setSelectedPointIndices(prev => {
+                    if (prev.includes(closestIndex)) {
+                        return prev.filter(i => i !== closestIndex);
+                    }
+                    return [...prev, closestIndex];
+                });
+            } else if (event.shiftKey && selectedPointIndices.length > 0) {
+                // Range selection with Shift click
+                const lastSelected = selectedPointIndices[selectedPointIndices.length - 1];
+                const start = Math.min(lastSelected, closestIndex);
+                const end = Math.max(lastSelected, closestIndex);
+                const range = [];
+                for (let i = start; i <= end; i++) range.push(i);
+                setSelectedPointIndices(prev => [...new Set([...prev, ...range])]);
+            } else if (!selectedPointIndices.includes(closestIndex)) {
+                // Single selection
+                setSelectedPointIndices([closestIndex]);
+            }
+            // If already selected, keep selection for group drag
+            
+            if (typeof event.pointerId === "number") {
+                try {
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    state.pointerId = event.pointerId;
+                    state.pointerTarget = event.currentTarget;
+                } catch (e) {}
+            }
+            return;
         }
 
         if (beginDraw(event)) return;
@@ -967,11 +1140,33 @@ export const createCanvasInteraction = ({
         const rect = event.currentTarget.getBoundingClientRect();
         const state = drawStateRef?.current;
 
-        // Handle point dragging in edit mode
-        if (state?.dragging && state.dragPointIndex !== null && updatePoint) {
-            const result = handlePointer(event.clientX, event.clientY, rect);
-            if (result) {
-                updatePoint(state.dragPointIndex, { x: result.snapped.x, y: result.snapped.y });
+        // Handle marquee selection drag
+        if (state?.isMarquee && setMarquee) {
+            const canvasPos = pointerToCanvas(event.clientX, event.clientY, rect);
+            setMarquee(prev => prev ? {
+                ...prev,
+                endX: canvasPos.cx,
+                endY: canvasPos.cy
+            } : null);
+            return;
+        }
+
+        // Handle point dragging in edit mode (multi-selection aware)
+        if (state?.dragging && state.dragPointIndex !== null) {
+            const world = pointerToWorld(event.clientX, event.clientY, rect);
+            const snapped = snapToField(world.x, world.y, snapStep());
+            
+            // If multiple points selected and dragging one of them, move all
+            if (selectedPointIndices && selectedPointIndices.length > 1 && selectedPointIndices.includes(state.dragPointIndex)) {
+                if (state.dragStartWorld && updatePoints) {
+                    const deltaX = snapped.x - state.dragStartWorld.x;
+                    const deltaY = snapped.y - state.dragStartWorld.y;
+                    // Update all selected points
+                    updatePoints(selectedPointIndices, deltaX, deltaY);
+                    state.dragStartWorld = snapped;
+                }
+            } else if (updatePoint) {
+                updatePoint(state.dragPointIndex, { x: snapped.x, y: snapped.y });
             }
             return;
         }
@@ -988,10 +1183,59 @@ export const createCanvasInteraction = ({
         const rect = event.currentTarget.getBoundingClientRect();
         const state = drawStateRef?.current;
 
+        // Complete marquee selection
+        if (state?.isMarquee && setMarquee && setSelectedPointIndices && points) {
+            const canvasPos = pointerToCanvas(event.clientX, event.clientY, rect);
+            const startX = state.marqueeStartX;
+            const startY = state.marqueeStartY;
+            const endX = canvasPos.cx;
+            const endY = canvasPos.cy;
+            
+            // Calculate marquee bounds in world coordinates
+            const minCx = Math.min(startX, endX);
+            const maxCx = Math.max(startX, endX);
+            const minCy = Math.min(startY, endY);
+            const maxCy = Math.max(startY, endY);
+            
+            // Find all points within marquee
+            const selected = [];
+            points.forEach((point, index) => {
+                const pointCanvas = worldToCanvas(point.x, point.y, center.x, center.y, ppi);
+                if (pointCanvas.cx >= minCx && pointCanvas.cx <= maxCx &&
+                    pointCanvas.cy >= minCy && pointCanvas.cy <= maxCy) {
+                    selected.push(index);
+                }
+            });
+            
+            // Update selection (shift adds to existing, otherwise replaces)
+            if (event.shiftKey && selectedPointIndices?.length) {
+                const combined = [...new Set([...selectedPointIndices, ...selected])];
+                setSelectedPointIndices(combined.length ? combined : []);
+            } else {
+                setSelectedPointIndices(selected.length ? selected : []);
+            }
+            
+            // Clear marquee state
+            state.isMarquee = false;
+            state.marqueeStartX = null;
+            state.marqueeStartY = null;
+            setMarquee(null);
+            
+            if (state.pointerId !== null && state.pointerTarget) {
+                try {
+                    state.pointerTarget.releasePointerCapture(state.pointerId);
+                } catch (e) {}
+            }
+            state.pointerId = null;
+            state.pointerTarget = null;
+            return;
+        }
+
         // Stop dragging in edit mode
         if (state?.dragging) {
             state.dragging = false;
             state.dragPointIndex = null;
+            state.dragStartWorld = null;
             if (state.pointerId !== null && state.pointerTarget) {
                 try {
                     state.pointerTarget.releasePointerCapture(state.pointerId);
@@ -1056,29 +1300,10 @@ export const createCanvasInteraction = ({
         if (!result) return;
         const {snapped, world} = result;
 
-        // Edit mode: select point
-        if (editMode && points && setSelectedPointIndex) {
-            const clickRadius = 15 / ppi; // 15 pixels in inches
-            let closestIndex = -1;
-            let closestDist = Infinity;
-
-            points.forEach((point, index) => {
-                const dx = point.x - world.x;
-                const dy = point.y - world.y;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-                if (dist < clickRadius && dist < closestDist) {
-                    closestDist = dist;
-                    closestIndex = index;
-                }
-            });
-
-            if (closestIndex >= 0) {
-                setSelectedPointIndex(closestIndex);
-                return;
-            } else {
-                setSelectedPointIndex(null);
-                return;
-            }
+        // Edit mode: handled in onPointerDown/onPointerUp, skip here
+        if (editMode && points && setSelectedPointIndices) {
+            // Selection is handled by pointer events, not click
+            return;
         }
 
         if (placeStart) {

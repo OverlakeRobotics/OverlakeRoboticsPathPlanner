@@ -1,5 +1,4 @@
-import {useEffect, useMemo, useRef, useState} from "react";
-import {FIELD_SIZE_IN} from "../constants/config";
+import {useEffect, useMemo, useRef, useState, useCallback} from "react";
 import {
     buildHeadingResolver,
     createAppendPointsApi,
@@ -10,6 +9,10 @@ import {
 } from "../utils/canvas";
 
 const getDevicePixelRatio = () => (typeof window !== "undefined" ? Math.max(1, window.devicePixelRatio || 1) : 1);
+
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 4;
+const ZOOM_STEP = 0.1;
 
 export default function CanvasStage({
                                         canvasSize,
@@ -41,14 +44,28 @@ export default function CanvasStage({
                                         playDist,
                                         waypoints,
                                         editMode,
-                                        selectedPointIndex,
-                                        setSelectedPointIndex,
+                                        selectedPointIndices,
+                                        setSelectedPointIndices,
                                         updatePoint,
+                                        updatePoints,
+                                        deletePoints,
+                                        palette,
+                                        fieldSize,
                                     }) {
     const canvasRef = useRef(null);
     const overlayRef = useRef(null);
+    const containerRef = useRef(null);
     const [dpr, setDpr] = useState(getDevicePixelRatio);
     const drawStateRef = useRef({drawing: false});
+    
+    // Zoom and pan state
+    const [zoom, setZoom] = useState(1);
+    const [pan, setPan] = useState({x: 0, y: 0});
+    const [isPanning, setIsPanning] = useState(false);
+    const lastPanPos = useRef({x: 0, y: 0});
+    
+    // Marquee selection state
+    const [marquee, setMarquee] = useState(null); // {startX, startY, endX, endY} in canvas coords
 
     useEffect(() => {
         const handle = () => setDpr(getDevicePixelRatio());
@@ -60,8 +77,59 @@ export default function CanvasStage({
         prepareCanvas(canvasRef.current, overlayRef.current, canvasSize, dpr);
     }, [canvasSize, dpr]);
 
-    const ppi = useMemo(() => canvasSize / FIELD_SIZE_IN, [canvasSize]);
-    const center = useMemo(() => ({x: canvasSize / 2, y: canvasSize / 2}), [canvasSize]);
+    // Zoom handlers
+    const handleZoom = useCallback((delta, clientX, clientY) => {
+        if (!canvasRef.current) return;
+        const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom + delta));
+        if (newZoom === zoom) return;
+
+        const rect = canvasRef.current.getBoundingClientRect();
+        const mouseX = clientX - rect.left;
+        const mouseY = clientY - rect.top;
+        
+        const ratio = newZoom / zoom;
+        const canvasCenter = canvasSize / 2;
+        
+        const mouseRelX = mouseX - canvasCenter;
+        const mouseRelY = mouseY - canvasCenter;
+        
+        const newPanX = mouseRelX - (mouseRelX - pan.x) * ratio;
+        const newPanY = mouseRelY - (mouseRelY - pan.y) * ratio;
+
+        setZoom(newZoom);
+        setPan({x: newPanX, y: newPanY});
+    }, [zoom, pan, canvasSize]);
+
+    const handleWheel = useCallback((e) => {
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
+        handleZoom(delta, e.clientX, e.clientY);
+    }, [handleZoom]);
+
+    // Reset zoom and pan
+    const resetView = useCallback(() => {
+        setZoom(1);
+        setPan({x: 0, y: 0});
+    }, []);
+
+    // Zoom controls
+    const zoomIn = useCallback(() => {
+        if (!canvasRef.current) return;
+        const rect = canvasRef.current.getBoundingClientRect();
+        handleZoom(ZOOM_STEP * 2, rect.left + rect.width / 2, rect.top + rect.height / 2);
+    }, [handleZoom]);
+
+    const zoomOut = useCallback(() => {
+        if (!canvasRef.current) return;
+        const rect = canvasRef.current.getBoundingClientRect();
+        handleZoom(-ZOOM_STEP * 2, rect.left + rect.width / 2, rect.top + rect.height / 2);
+    }, [handleZoom]);
+
+    const ppi = useMemo(() => (canvasSize / fieldSize) * zoom, [canvasSize, fieldSize, zoom]);
+    const center = useMemo(() => ({
+        x: canvasSize / 2 + pan.x,
+        y: canvasSize / 2 + pan.y
+    }), [canvasSize, pan]);
 
     const cx = (fieldY) => center.x - fieldY * ppi;
     const cy = (fieldX) => center.y - fieldX * ppi;
@@ -108,9 +176,15 @@ export default function CanvasStage({
                 setDrawTemp,
                 editMode,
                 points,
-                selectedPointIndex,
-                setSelectedPointIndex,
+                selectedPointIndices,
+                setSelectedPointIndices,
                 updatePoint,
+                updatePoints,
+                fieldSize,
+                zoom,
+                setMarquee,
+                marquee,
+                robot,
             }),
         [
             canvasSize,
@@ -132,9 +206,14 @@ export default function CanvasStage({
             setDrawTemp,
             editMode,
             points,
-            selectedPointIndex,
-            setSelectedPointIndex,
+            selectedPointIndices,
+            setSelectedPointIndices,
             updatePoint,
+            updatePoints,
+            fieldSize,
+            zoom,
+            marquee,
+            robot,
         ],
     );
 
@@ -196,8 +275,12 @@ export default function CanvasStage({
             playDist,
             waypoints,
             drawTemp,
-            selectedPointIndex,
+            selectedPointIndices,
             editMode,
+            palette,
+            fieldSize,
+            zoom,
+            marquee,
         });
 
         if (preview) {
@@ -239,17 +322,60 @@ export default function CanvasStage({
         playDist,
         waypoints,
         drawTemp,
+        selectedPointIndices,
+        editMode,
+        zoom,
+        marquee,
     ]);
 
+    // Pan handlers for middle mouse button
+    const handlePanStart = useCallback((e) => {
+        if (e.button === 1 || (e.button === 0 && e.altKey)) { // Middle mouse or Alt+left
+            e.preventDefault();
+            setIsPanning(true);
+            lastPanPos.current = {x: e.clientX, y: e.clientY};
+        }
+    }, []);
+
+    const handlePanMove = useCallback((e) => {
+        if (!isPanning) return;
+        const dx = e.clientX - lastPanPos.current.x;
+        const dy = e.clientY - lastPanPos.current.y;
+        setPan(prev => ({x: prev.x + dx, y: prev.y + dy}));
+        lastPanPos.current = {x: e.clientX, y: e.clientY};
+    }, [isPanning]);
+
+    const handlePanEnd = useCallback(() => {
+        setIsPanning(false);
+    }, []);
+
     return (
-        <div className="canvas-frame">
-            <div className="canvas-stack" style={{width: `${canvasSize}px`, height: `${canvasSize}px`}}>
+        <div className="canvas-frame" ref={containerRef}>
+            {/* Zoom Controls */}
+            <div className="zoom-controls">
+                <button className="zoom-btn" onClick={zoomIn} title="Zoom In">+</button>
+                <span className="zoom-level">{Math.round(zoom * 100)}%</span>
+                <button className="zoom-btn" onClick={zoomOut} title="Zoom Out">−</button>
+                <button className="zoom-btn reset" onClick={resetView} title="Reset View">⟲</button>
+            </div>
+            <div 
+                className="canvas-stack" 
+                style={{
+                    width: `${canvasSize}px`, 
+                    height: `${canvasSize}px`,
+                    cursor: isPanning ? 'grabbing' : (editMode ? 'crosshair' : undefined),
+                }}
+                onMouseDown={handlePanStart}
+                onMouseMove={handlePanMove}
+                onMouseUp={handlePanEnd}
+                onMouseLeave={handlePanEnd}
+            >
                 <canvas
                     ref={canvasRef}
                     width={canvasSize}
                     height={canvasSize}
                     style={{
-                        cursor: shapeType === "draw" && !placeStart ? "none" : undefined,
+                        cursor: isPanning ? 'grabbing' : (shapeType === "draw" && !placeStart ? "none" : undefined),
                         touchAction: "none",
                     }}
                     onPointerDown={handlers.onPointerDown}
@@ -258,6 +384,7 @@ export default function CanvasStage({
                     onPointerLeave={handlers.onPointerLeave}
                     onPointerCancel={handlers.onPointerCancel}
                     onClick={handlers.onClick}
+                    onWheel={handleWheel}
                 />
                 <canvas ref={overlayRef} className="overlay" width={canvasSize} height={canvasSize} />
             </div>
