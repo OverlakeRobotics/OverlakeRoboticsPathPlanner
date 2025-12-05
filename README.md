@@ -4,9 +4,9 @@ A powerful, web-based path planning tool designed for robotics competitions (FTC
 
 ![Path Planner Screenshot](https://via.placeholder.com/800x450?text=Path+Planner+Interface)
 
-## 🚀 Features
+## Features
 
-### 🎯 Path Design
+### Path Design
 - **Interactive Field:** Drag-and-drop interface with a field background.
 - **Multiple Segment Types:** Create paths using **Lines**, **Bézier Curves**, and **Circular Arcs**.
 - **Heading Control:** Choose from various heading strategies:
@@ -15,31 +15,31 @@ A powerful, web-based path planning tool designed for robotics competitions (FTC
   - **Orthogonal:** Face 90° left or right relative to the path.
 - **Edit Mode:** Fine-tune your path by selecting, moving, or deleting existing waypoints.
 
-### 🤖 Robot Configuration
+### Robot Configuration
 - **Physical Constraints:** Define robot length and width for accurate collision visualization.
 - **Motion Profiling:** Set global velocity, maximum acceleration, and path tolerance.
 - **Live Sync:** Connect to a running robot to visualize its live pose on the field (requires compatible robot server).
 
-### 🏷️ Event Tagging
+### Event Tagging
 Attach metadata "tags" to specific waypoints to trigger robot actions during the path:
 - **Velocity Overrides:** Change speed for specific segments.
 - **Mechanism Control:** Triggers for Intake, Shooter, Hood Angle, etc.
 - **Wait Commands:** Insert pauses at specific points.
 - **Auto-Aim:** Flags for alliance-specific aiming (Red/Blue).
 
-### 💾 Export & Import
+### Export & Import
 - **Code Generation:** Automatically generates Java code (`Pose2D` arrays) ready to paste into your robot project.
 - **Save/Load:** Export paths as JSON files to save your work and share with teammates.
 - **Mirroring:** One-click path mirroring for Red/Blue alliance switching.
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 - **Frontend Framework:** [React 19](https://react.dev/)
 - **Build Tool:** [Vite](https://vitejs.dev/)
 - **Language:** JavaScript (ESModules)
 - **Styling:** CSS Modules / Standard CSS
 
-## 📦 Installation
+## Installation
 
 1.  **Clone the repository:**
     ```bash
@@ -60,7 +60,7 @@ Attach metadata "tags" to specific waypoints to trigger robot actions during the
 4.  **Open in browser:**
     Navigate to `http://localhost:5173` (or the port shown in your terminal).
 
-## 🎮 Usage Guide
+## Usage Guide
 
 ### 1. Building a Path
 - Use the **Build Panel** on the left to select your segment type (Line, Bezier, Arc).
@@ -82,7 +82,7 @@ Attach metadata "tags" to specific waypoints to trigger robot actions during the
 - Click **Copy Code** to get the Java snippet.
 - Click **Export JSON** to save the file for later editing.
 
-## 📂 Project Structure
+## Project Structure
 
 ```
 src/
@@ -98,7 +98,7 @@ src/
 └── main.jsx            # Entry point
 ```
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Please follow these steps:
 1.  Fork the repository.
