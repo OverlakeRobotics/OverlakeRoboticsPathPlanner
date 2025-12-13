@@ -11,8 +11,9 @@ export function useRobotConnection(hubIp) {
     const [lastMessageTime, setLastMessageTime] = useState(null);
 
     const socketRef = useRef(null);
-    // merge HTTP-polled pose (PathServer) as a fallback when websocket doesn't provide pose
-    const { livePose: polledPose } = usePosePolling({ enabled: true, hubUrl: `http://${hubIp}:8099/pose` });
+    const robotStatusRef = useRef(null);
+    const isPathPlanner = robotStatus && robotStatus.opMode === 'Path Planner';
+    const { livePose: polledPose } = usePosePolling({ enabled: isPathPlanner, hubUrl: `http://${hubIp}:8099/pose` });
 
     useEffect(() => {
         const socket = new RobotWebSocket(hubIp, HUB_WS_PORT);
@@ -46,10 +47,10 @@ export function useRobotConnection(hubIp) {
 
         socket.onMessage = (message) => {
             setLastMessageTime(Date.now());
-
+    
             if (message.type === 'RECEIVE_ROBOT_STATUS') {
                 const status = message.status || message;
-
+    
                 // Normalize robot status fields so UI components can rely on consistent keys
                 const normalized = {
                     // prefer explicit mapping; fall back to existing keys
@@ -61,15 +62,26 @@ export function useRobotConnection(hubIp) {
                     // keep original payload for advanced uses
                     raw: status,
                 };
-
+    
                 setRobotStatus(normalized);
-
+                robotStatusRef.current = normalized;
+    
                 // WebSocket does not provide live pose in this setup; rely on HTTP polling instead.
                 return;
             }
-
-            // other message types handled below
-
+    
+            // Support receiving a list of available op modes from the hub
+            if (message.type === 'RECEIVE_OP_MODE_LIST') {
+                try {
+                    const list = Array.isArray(message.opModeList) ? message.opModeList : (message.list || []);
+                    setRobotConfig((prev) => ({ ...(prev || {}), opModeList: list }));
+                    return;
+                } catch (e) {
+                    console.error('Error processing op mode list', e);
+                }
+                return;
+            }
+    
             if (message.type === 'RECEIVE_CONFIG') {
                 // Some robot configs are sent with nested __type / __value wrappers.
                 // Unwrap them to plain JS objects before storing.
@@ -105,6 +117,11 @@ export function useRobotConnection(hubIp) {
         });
     }, [polledPose]);
 
+    // Keep ref in sync when robotStatus changes outside socket handler
+    useEffect(() => {
+        robotStatusRef.current = robotStatus;
+    }, [robotStatus]);
+
     useEffect(() => {
         let interval;
         if (isConnected) {
@@ -120,6 +137,7 @@ export function useRobotConnection(hubIp) {
     }, [isConnected]);
 
     const sendInit = useCallback((opModeName) => {
+        console.log('[useRobotConnection] sendInit called with:', opModeName);
         socketRef.current?.sendInit(opModeName);
     }, []);
 
@@ -131,6 +149,15 @@ export function useRobotConnection(hubIp) {
         socketRef.current?.sendStop();
     }, []);
 
+    const getRobotStatus = useCallback(() => robotStatusRef.current, []);
+
+    const isInitializedFor = useCallback((opModeName) => {
+        const s = robotStatusRef.current;
+        if (!s || !opModeName) return false;
+        const cur = String(s.opMode || s.raw?.activeOpMode || '').toLowerCase();
+        return cur.includes(String(opModeName).toLowerCase());
+    }, []);
+
     return {
         isConnected,
         robotStatus,
@@ -138,6 +165,8 @@ export function useRobotConnection(hubIp) {
         livePose,
         sendInit,
         sendStart,
-        sendStop
+        sendStop,
+        getRobotStatus,
+        isInitializedFor
     };
 }

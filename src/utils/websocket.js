@@ -66,11 +66,15 @@ export class RobotWebSocket {
 
     send(payload) {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            console.log(`WebSocket sending: ${JSON.stringify(payload)}`);
             this.ws.send(JSON.stringify(payload));
+        } else {
+            console.log(`WebSocket not open, readyState: ${this.ws ? this.ws.readyState : 'no ws'}`);
         }
     }
 
     sendInit(opModeName) {
+        console.log(`WebSocket sendInit called with opModeName: ${opModeName}`);
         this.send({ type: 'INIT_OP_MODE', opModeName });
     }
 

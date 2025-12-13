@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 
 const uploadLabel = (status) =>
     status === "sending" ? "Uploading…" : status === "ok" ? "Uploaded" : status === "fail" ? "Failed Upload" : "Upload";
@@ -49,16 +49,24 @@ export default function RunPanel({
                                      // WebSocket & Robot Status
                                      isConnected,
                                      robotStatus,
+                                     robotConfig,
                                      onInstantUploadInit,
                                      onInit,
                                      onStart,
                                      onStopOpMode,
                                  }) {
+    useEffect(() => {
+        console.log('[RunPanel] Rendered. isConnected:', isConnected, 'robotStatus:', robotStatus, 'disabled:', robotStatus?.status === 'RUNNING');
+    }, [isConnected, robotStatus, onInit]);
+
     const lengthDisplay = toFixed(totalLength, 1);
     const timeDisplay = Number.isFinite(estTimeSec) ? toFixed(estTimeSec, 1) : "0.0";
     const progress = totalLength > 0 ? Math.round((playDist / totalLength) * 100) : 0;
 
     const fileInputRef = useRef(null);
+    const [initialized, setInitialized] = useState(false);
+    const [hasSentInit, setHasSentInit] = useState(false);
+    const [debugMsg, setDebugMsg] = useState("");
     const [editingIndex, setEditingIndex] = useState(null);
     const [editName, setEditName] = useState("");
     const [editValue, setEditValue] = useState(0);
@@ -66,6 +74,8 @@ export default function RunPanel({
     const [draggedIndex, setDraggedIndex] = useState(null);
     const [dragOverIndex, setDragOverIndex] = useState(null);
     const [expandedPoints, setExpandedPoints] = useState({});
+    // Selected op mode must be chosen before initializing the robot
+    const [selectedOpMode, setSelectedOpMode] = useState("");
 
     const [isAddingTag, setIsAddingTag] = useState(false);
     const [newTagName, setNewTagName] = useState("");
@@ -89,6 +99,106 @@ export default function RunPanel({
         }));
     };
 
+    // Keep a ref to the latest robotStatus for async waiting checks
+    const robotStatusRef = useRef(robotStatus);
+    useEffect(() => { robotStatusRef.current = robotStatus; }, [robotStatus]);
+
+    const waitForOpMode = (opMode, timeoutMs = 6000) => new Promise((resolve, reject) => {
+        const deadline = Date.now() + timeoutMs;
+        const check = () => {
+            const cur = robotStatusRef.current;
+            if (cur && cur.opMode && String(cur.opMode).includes(opMode)) return resolve(true);
+            if (Date.now() > deadline) return reject(new Error('timeout'));
+            setTimeout(check, 200);
+        };
+        check();
+    });
+
+    useEffect(() => {
+        // Sync local initialized state with robotStatus prop
+        if (!robotStatus) {
+            setInitialized(false);
+            setHasSentInit(false);
+            return;
+        }
+        const active = robotStatus.activeOpMode || robotStatus.opMode || robotStatus.activeOpModeName || robotStatus.opModeName;
+        const stateStr = robotStatus.activeOpModeStatus || robotStatus.status || robotStatus.state || robotStatus.activeOpModeStatus;
+        const isPathActive = typeof active === 'string' && active.toLowerCase().includes('path');
+        
+        // Only consider "initialized" (showing Start button) if we are in INIT or QUEUED state.
+        // If we are RUNNING, we want the button to show "Init" (to allow restart).
+        const isInInitPhase = typeof stateStr === 'string' && (stateStr.toLowerCase().includes('init') || stateStr.toLowerCase().includes('queued'));
+        
+        const newInitialized = Boolean(isPathActive && isInInitPhase);
+        setInitialized(newInitialized);
+        // Reset hasSentInit if robot is no longer initialized
+        if (!newInitialized) {
+            setHasSentInit(false);
+        }
+    }, [robotStatus]);
+
+    // Initialize selectedOpMode to "Path Planner" by default, or first available opmode when list is loaded
+    useEffect(() => {
+        if (!selectedOpMode) {
+            setSelectedOpMode("Path Planner");
+        } else if (robotConfig?.opModeList?.length > 0 && !robotConfig.opModeList.includes(selectedOpMode)) {
+            // If selectedOpMode is not in the list, switch to the first available
+            setSelectedOpMode(robotConfig.opModeList[0]);
+        }
+    }, [robotConfig?.opModeList, selectedOpMode]);
+
+    const handleUploadClick = async () => {
+        if (!selectedOpMode) {
+            setDebugMsg('Select an OpMode before initializing/uploading.');
+            return;
+        }
+        
+        // If already initialized to the correct opmode, just upload
+        const currentOpMode = robotStatusRef.current?.opMode || '';
+        const currentStatus = robotStatusRef.current?.status || '';
+        if (currentOpMode.includes(selectedOpMode) && currentStatus !== 'STOPPED') {
+             setDebugMsg('Already initialized, uploading...');
+             if (onUpload) onUpload();
+             setHasSentInit(true);
+             return;
+        }
+
+        setDebugMsg(`Initializing ${selectedOpMode}...`);
+        try {
+            if (onInit) onInit(selectedOpMode);
+            setHasSentInit(true);
+            
+            // Wait for robot to report it is in the correct OpMode
+            await waitForOpMode(selectedOpMode);
+            
+            setDebugMsg('Initialized! Uploading path...');
+            // Small delay to ensure robot is ready to accept commands/files
+            await new Promise(r => setTimeout(r, 500));
+            
+            if (onUpload) onUpload();
+            setDebugMsg('Upload requested');
+        } catch (e) {
+            console.error(e);
+            setDebugMsg('Init/Upload failed or timed out');
+        }
+    };
+    
+    const handleInitStartClick = () => {
+        console.log(`[RunPanel] Init/Start Clicked. initialized: ${initialized}, hasSentInit: ${hasSentInit}`);
+        if (!initialized && !hasSentInit) {
+            console.log(`[RunPanel] Sending INIT with selectedOpMode: ${selectedOpMode}`);
+            setDebugMsg(`Sending INIT (${selectedOpMode})...`);
+            if (onInit) onInit(selectedOpMode);
+            setHasSentInit(true);
+            setTimeout(() => setDebugMsg('Initialized (local)'), 600);
+        } else {
+            console.log('[RunPanel] Sending START');
+            setDebugMsg('Starting path...');
+            if (onStart) onStart();
+            setTimeout(() => setDebugMsg('Start requested'), 600);
+        }
+    };
+
     return (
         <aside className="panel panel-run">
             <div className="panel-header">
@@ -101,13 +211,13 @@ export default function RunPanel({
                         <p>Manage robot connection and execution.</p>
                     </div>
                     <div className="card-actions stack">
-                        {/* Primary Init Action */}
+                        {/* Primary Upload (INIT then Upload) */}
                         <button 
                             className={uploadClass(uploadStatus)} 
-                            onClick={onInstantUploadInit}
+                            onClick={handleUploadClick}
                             disabled={uploadStatus === "sending"}
                         >
-                            {uploadStatus === "sending" ? "Initializing..." : "Initialize & Upload"}
+                            {uploadStatus === "sending" ? "Uploading..." : "Upload"}
                         </button>
 
                         {/* Connection & Robot Status */}
@@ -119,6 +229,11 @@ export default function RunPanel({
                             marginTop: '0.5rem',
                             marginBottom: '0.5rem'
                         }}>
+                            {debugMsg && (
+                                <div style={{marginTop: '0.5rem', fontSize: '0.85rem', opacity: 0.9}}>
+                                    {debugMsg}
+                                </div>
+                            )}
                             <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem'}}>
                                 <div style={{
                                     width: '8px', 
@@ -148,6 +263,33 @@ export default function RunPanel({
                                             {robotStatus.status}
                                         </div>
                                     </div>
+                                    {/* OpMode selector sourced from robotConfig.opModeList when available */}
+                                    {robotConfig?.opModeList?.length > 0 && (
+                                        <div style={{gridColumn: 'span 2', marginTop: '0.5rem'}}>
+                                            <label style={{display: 'block', fontSize: '0.75rem', opacity: 0.8, marginBottom: '0.25rem'}}>Select OpMode</label>
+                                            <div style={{width: '100%', maxHeight: 140, overflowY: 'auto', padding: '0.25rem', borderRadius: 6, border: '1px solid rgba(0,0,0,0.06)'}}>
+                                                {robotConfig.opModeList.map((m, i) => (
+                                                    <div
+                                                        key={i}
+                                                        role="button"
+                                                        tabIndex={0}
+                                                        onClick={() => setSelectedOpMode(m)}
+                                                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setSelectedOpMode(m); }}
+                                                        style={{
+                                                            padding: '0.4rem',
+                                                            borderRadius: 4,
+                                                            cursor: 'pointer',
+                                                            background: selectedOpMode === m ? 'rgba(16,185,129,0.12)' : 'transparent',
+                                                            border: selectedOpMode === m ? '1px solid rgba(16,185,129,0.12)' : '1px solid transparent',
+                                                            marginBottom: 4,
+                                                        }}
+                                                    >
+                                                        {m}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -155,12 +297,11 @@ export default function RunPanel({
                         {/* Execution Controls */}
                         {isConnected ? (
                             <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem'}}>
-                                <button 
-                                    className="btn ok" 
-                                    onClick={onStart}
-                                    disabled={robotStatus?.status === 'RUNNING'}
+                                <button
+                                    className="btn ok"
+                                    onClick={handleInitStartClick}
                                 >
-                                    ▶ Start Path
+                                    {(initialized || hasSentInit) ? '▶ Start' : 'Init'}
                                 </button>
                                 <button 
                                     className="btn danger" 

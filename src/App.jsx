@@ -634,6 +634,13 @@ export default function App() {
             tolerance: Number(tolerance) || 0,
             tags: tags.map((tag) => ({index: Number(tag.index) || 0, name: String(tag.name || ""), value: Number(tag.value) || 0})),
         };
+        // Ensure robot is initialized before upload
+        try {
+            sendInit("Path Planner");
+        } catch (e) {
+            // ignore
+        }
+
         return fetch(`http://${hubIp}:8099/points`, {
             method: "POST",
             headers: {"Content-Type": "application/json"},
@@ -1013,6 +1020,7 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                 onSwitchSides={switchSides}
                 isConnected={isConnected}
                 robotStatus={robotStatus}
+                robotConfig={robotConfig}
                 onInstantUploadInit={doInstantUploadInit}
                 onInit={sendInit}
                 onStart={sendStart}

@@ -28,7 +28,7 @@ export const DEFAULT_ROBOT_DIMENSIONS = {
 };
 
 // === Remote Hub Communication ===
-export const POSE_POLL_INTERVAL_MS = 10;
+export const POSE_POLL_INTERVAL_MS = 500; // increase default poll interval to reduce spamming on connection failures
 export const HUB_IP = "192.168.43.1";
 export const HUB_POINTS_URL = `http://${HUB_IP}:8099/points`;
 export const HUB_POSE_URL = `http://${HUB_IP}:8099/pose`;
