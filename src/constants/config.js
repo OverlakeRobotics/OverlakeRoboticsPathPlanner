@@ -61,3 +61,7 @@ export const DRAW_RAW_COLOR = "#94a3b8";
 export const DRAW_FIT_COLOR = "#38bdf8";
 export const DRAW_LABEL_FILL = "rgba(15,23,42,0.82)";
 export const DRAW_LABEL_STROKE = "rgba(255,255,255,0.8)";
+
+export const HUB_WS_PORT = 8000;
+
+

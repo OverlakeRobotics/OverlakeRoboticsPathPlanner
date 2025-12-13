@@ -1,3 +1,5 @@
+import { useState, useRef } from "react";
+
 const uploadLabel = (status) =>
     status === "sending" ? "Uploading…" : status === "ok" ? "Uploaded" : status === "fail" ? "Failed Upload" : "Upload";
 
@@ -44,6 +46,13 @@ export default function RunPanel({
                                      onImportFile,
                                      points,
                                      onSwitchSides,
+                                     // WebSocket & Robot Status
+                                     isConnected,
+                                     robotStatus,
+                                     onInstantUploadInit,
+                                     onInit,
+                                     onStart,
+                                     onStopOpMode,
                                  }) {
     const lengthDisplay = toFixed(totalLength, 1);
     const timeDisplay = Number.isFinite(estTimeSec) ? toFixed(estTimeSec, 1) : "0.0";
@@ -88,18 +97,88 @@ export default function RunPanel({
             <div className="panel-body scroll-area">
                 <section className="control-card">
                     <div className="card-header">
-                        <h3>Actions</h3>
-                        <p>Synchronize with the hub or copy generated code.</p>
+                        <h3>Robot Control</h3>
+                        <p>Manage robot connection and execution.</p>
                     </div>
                     <div className="card-actions stack">
-                        <button className={uploadClass(uploadStatus)} onClick={onUpload}>
-                            {uploadLabel(uploadStatus)}
+                        {/* Primary Init Action */}
+                        <button 
+                            className={uploadClass(uploadStatus)} 
+                            onClick={onInstantUploadInit}
+                            disabled={uploadStatus === "sending"}
+                        >
+                            {uploadStatus === "sending" ? "Initializing..." : "Initialize & Upload"}
                         </button>
-                        <button className={runClass(runStatus)} onClick={onRun}>
-                            {runLabel(runStatus)}
-                        </button>
+
+                        {/* Connection & Robot Status */}
+                        <div className="robot-status-panel" style={{
+                            background: isConnected ? 'rgba(74, 222, 128, 0.1)' : 'rgba(248, 113, 113, 0.1)',
+                            border: `1px solid ${isConnected ? 'rgba(74, 222, 128, 0.2)' : 'rgba(248, 113, 113, 0.2)'}`,
+                            borderRadius: '6px',
+                            padding: '0.75rem',
+                            marginTop: '0.5rem',
+                            marginBottom: '0.5rem'
+                        }}>
+                            <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem'}}>
+                                <div style={{
+                                    width: '8px', 
+                                    height: '8px', 
+                                    borderRadius: '50%', 
+                                    background: isConnected ? '#4ade80' : '#f87171',
+                                    boxShadow: isConnected ? '0 0 8px #4ade80' : 'none'
+                                }} />
+                                <span style={{fontSize: '0.9rem', fontWeight: 500}}>
+                                    {isConnected ? "Connected to Robot" : "Disconnected"}
+                                </span>
+                            </div>
+
+                            {isConnected && robotStatus && (
+                                <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.8rem'}}>
+                                    <div>
+                                        <span style={{opacity: 0.7}}>OpMode:</span>
+                                        <div style={{fontWeight: 600}}>{robotStatus.opMode}</div>
+                                    </div>
+                                    <div>
+                                        <span style={{opacity: 0.7}}>Battery:</span>
+                                        <div style={{fontWeight: 600}}>{robotStatus.battery} V</div>
+                                    </div>
+                                    <div style={{gridColumn: 'span 2'}}>
+                                        <span style={{opacity: 0.7}}>Status:</span>
+                                        <div style={{fontWeight: 600, color: robotStatus.status === 'RUNNING' ? '#4ade80' : 'inherit'}}>
+                                            {robotStatus.status}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Execution Controls */}
+                        {isConnected ? (
+                            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem'}}>
+                                <button 
+                                    className="btn ok" 
+                                    onClick={onStart}
+                                    disabled={robotStatus?.status === 'RUNNING'}
+                                >
+                                    ▶ Start Path
+                                </button>
+                                <button 
+                                    className="btn danger" 
+                                    onClick={onStopOpMode}
+                                >
+                                    ⏹ Stop
+                                </button>
+                            </div>
+                        ) : (
+                            <p className="helper-text" style={{textAlign: 'center', margin: 0}}>
+                                Connect to robot WiFi to enable controls
+                            </p>
+                        )}
+
+                        <div className="divider" style={{height: '1px', background: 'rgba(255,255,255,0.1)', margin: '0.5rem 0'}} />
+                        
                         <button className="btn ghost" onClick={onCopy}>
-                            {copied ? "Copied!" : "Copy code"}
+                            {copied ? "Copied!" : "Copy Code to Clipboard"}
                         </button>
                     </div>
                 </section>
@@ -496,7 +575,7 @@ export default function RunPanel({
     );
 }
 
-import {useRef, useState} from "react";
+
 
 const Stat = ({label, value}) => (
     <div className="stat-card">

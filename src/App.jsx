@@ -38,6 +38,7 @@ import {
 import {usePosePolling} from "./hooks/usePosePolling";
 import {usePlayback} from "./hooks/usePlayback";
 import {useTheme} from "./hooks/useTheme";
+import {useRobotConnection} from "./hooks/useRobotConnection";
 import {clamp, num, normDeg, toFixed} from "./utils/math";
 import {polylineLength} from "./utils/path";
 
@@ -292,9 +293,8 @@ export default function App() {
     const runTimerRef = useRef(null);
     const undoRef = useRef(() => {});
 
-    const {livePose, robotState} = usePosePolling({
-        hubUrl: `http://${hubIp}:8099/pose`
-    });
+    const { isConnected, robotStatus, robotConfig, sendInit, sendStart, sendStop, livePose } = useRobotConnection(hubIp);
+    const robotState = robotStatus?.activeOpModeStatus || null;
 
     useEffect(() => {
         const img = new Image();
@@ -634,7 +634,7 @@ export default function App() {
             tolerance: Number(tolerance) || 0,
             tags: tags.map((tag) => ({index: Number(tag.index) || 0, name: String(tag.name || ""), value: Number(tag.value) || 0})),
         };
-        fetch(`http://${hubIp}:8099/points`, {
+        return fetch(`http://${hubIp}:8099/points`, {
             method: "POST",
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify(payload),
@@ -643,10 +643,52 @@ export default function App() {
                 setUploadStatus("ok");
                 uploadTimerRef.current = setTimeout(() => setUploadStatus("idle"), UPLOAD_RESET_OK_MS);
             })
-            .catch(() => {
+            .catch((e) => {
                 setUploadStatus("fail");
                 uploadTimerRef.current = setTimeout(() => setUploadStatus("idle"), UPLOAD_RESET_FAIL_MS);
+                throw e;
             });
+    };
+
+    const doInstantUploadInit = async () => {
+        // First request the robot to init the Path Planner op mode, then upload once the robot reports the op mode.
+        try {
+            setUploadStatus("sending");
+            sendInit("Path Planner");
+
+            // Wait up to 6s for the robotStatus.opMode to reflect the requested op mode
+            const start = Date.now();
+            const timeoutMs = 6000;
+            const pollMs = 400;
+            let ready = false;
+            while (Date.now() - start < timeoutMs) {
+                // Prefer explicit opMode match; fall back to presence of robotConfig or connection
+                if (robotStatus && robotStatus.opMode && String(robotStatus.opMode).includes("Path")) {
+                    ready = true;
+                    break;
+                }
+                if (robotConfig) {
+                    ready = true;
+                    break;
+                }
+                // sleep
+                // eslint-disable-next-line no-await-in-loop
+                await new Promise((r) => setTimeout(r, pollMs));
+            }
+
+            if (!ready) {
+                // Robot didn't come up in time; mark failure
+                setUploadStatus("fail");
+                uploadTimerRef.current = setTimeout(() => setUploadStatus("idle"), UPLOAD_RESET_FAIL_MS);
+                return;
+            }
+
+            // Now perform the upload
+            await doUpload();
+        } catch (e) {
+            // doUpload and other failures already set status; ensure it's marked
+            setUploadStatus((s) => (s === "sending" ? "fail" : s));
+        }
     };
 
     const doRun = () => {
@@ -969,6 +1011,12 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                 onImportFile={onImportPath}
                 points={points}
                 onSwitchSides={switchSides}
+                isConnected={isConnected}
+                robotStatus={robotStatus}
+                onInstantUploadInit={doInstantUploadInit}
+                onInit={sendInit}
+                onStart={sendStart}
+                onStopOpMode={sendStop}
             />
         </div>
         </div>
