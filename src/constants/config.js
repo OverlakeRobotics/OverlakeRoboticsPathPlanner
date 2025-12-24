@@ -1,67 +1,239 @@
-// === Field Geometry ===
-export const FIELD_SIZE_IN = 144;
-export const FIELD_EDGE_IN = FIELD_SIZE_IN / 2;
-
-// === Canvas & Layout ===
-export const DEFAULT_CANVAS_SIZE = 720;
-export const DEFAULT_LEFT_PANEL_WIDTH = 420;
-export const DEFAULT_RIGHT_PANEL_WIDTH = 420;
-export const MIN_LEFT_PANEL_WIDTH = 240;
-export const MIN_RIGHT_PANEL_WIDTH = 240;
-
-// === Grid & Snapping ===
-export const GRID_DEFAULT_STEP = 24;
-export const GRID_MIN_STEP = 0.25;
-export const DEFAULT_SNAP_IN = 3;
-
-// === Planner Defaults ===
-export const DEFAULT_TOLERANCE_IN = 5;
-export const DEFAULT_VELOCITY_IN_PER_S = 30;
-export const DEFAULT_PLAYBACK_SPEED_IN_PER_S = 30;
-export const DEFAULT_MAX_ACCEL_IN_PER_S2 = 40;
-export const SPEED_PROFILE_SAMPLE_STEP_IN = 1;
-export const EPS = 1e-6;
-
-export const DEFAULT_ROBOT_DIMENSIONS = {
-    length: 18,
-    width: 18,
+const DEFAULT_CONFIG = {
+    TAG_TEMPLATES: [
+        { name: "velocity", defaultValue: 50, unit: "in/s" },
+        { name: "pause", defaultValue: 1, unit: "seconds" },
+        { name: "intake", defaultValue: 0, unit: "ticks/s" },
+        { name: "autoAim", defaultValue: 0, unit: "" },
+        { name: "shooterVelocity", defaultValue: 0, unit: "ticks/s" },
+        { name: "hoodAngle", defaultValue: 0, unit: "degrees" },
+        { name: "launchArtifacts", defaultValue: 1, unit: "seconds" },
+    ],
+    FIELD_SIZE_IN: 144,
+    DEFAULT_CANVAS_SIZE: 720,
+    DEFAULT_LEFT_PANEL_WIDTH: 420,
+    DEFAULT_RIGHT_PANEL_WIDTH: 420,
+    MIN_LEFT_PANEL_WIDTH: 240,
+    MIN_RIGHT_PANEL_WIDTH: 240,
+    GRID_DEFAULT_STEP: 24,
+    GRID_MIN_STEP: 0.25,
+    DEFAULT_SNAP_IN: 3,
+    DEFAULT_TOLERANCE_IN: 5,
+    DEFAULT_VELOCITY_IN_PER_S: 30,
+    DEFAULT_PLAYBACK_SPEED_IN_PER_S: 30,
+    DEFAULT_MAX_ACCEL_IN_PER_S2: 40,
+    SPEED_PROFILE_SAMPLE_STEP_IN: 1,
+    EPS: 1e-6,
+    DEFAULT_ROBOT_DIMENSIONS: {
+        length: 18,
+        width: 18,
+    },
+    POSE_POLL_INTERVAL_MS: 500,
+    HUB_IP: "192.168.43.1",
+    HUB_PORT: 8099,
+    LIVE_POSE_SYNC_PREFIX: "init",
+    UPLOAD_RESET_OK_MS: 1800,
+    UPLOAD_RESET_FAIL_MS: 2200,
+    PATH_SAMPLE_STEP_IN: 1,
+    BEZIER_MIN_SAMPLES: 8,
+    BEZIER_MAX_SAMPLES: 200,
+    ARC_MAX_SAMPLES: 240,
+    MIN_DRAW_SAMPLE_SPACING_IN: 0.25,
+    MIN_DRAW_SEGMENT_LEN_IN: 0.5,
+    DRAW_SIMPLIFY_TOLERANCE_IN: 0.2,
+    PATH_COLOR: "#5cd2ff",
+    START_COLOR: "#ffd166",
+    WAYPOINT_COLOR: "#cbd5e1",
+    LAST_POINT_COLOR: "#ffffff",
+    FOOTPRINT_FILL: "#6be675",
+    LIVE_POSE_FILL: "#ff6ad5",
+    PREVIEW_FILL: "#94e2b8",
+    DRAW_RAW_COLOR: "#94a3b8",
+    DRAW_FIT_COLOR: "#38bdf8",
+    DRAW_LABEL_FILL: "rgba(15,23,42,0.82)",
+    DRAW_LABEL_STROKE: "rgba(255,255,255,0.8)",
+    HUB_WS_PORT: 8000
 };
 
-// === Remote Hub Communication ===
-export const POSE_POLL_INTERVAL_MS = 500; // increase default poll interval to reduce spamming on connection failures
-export const HUB_IP = "192.168.43.1";
-export const HUB_POINTS_URL = `http://${HUB_IP}:8099/points`;
-export const HUB_POSE_URL = `http://${HUB_IP}:8099/pose`;
-export const HUB_RUN_URL = `http://${HUB_IP}:8099/run`;
-export const LIVE_POSE_SYNC_PREFIX = "init";
+const isPlainObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
-export const UPLOAD_RESET_OK_MS = 1800;
-export const UPLOAD_RESET_FAIL_MS = 2200;
+const toNumber = (value, fallback) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+};
 
-// === Path Sampling ===
-export const PATH_SAMPLE_STEP_IN = 1;
-export const BEZIER_MIN_SAMPLES = 8;
-export const BEZIER_MAX_SAMPLES = 200;
-export const ARC_MAX_SAMPLES = 240;
-export const MIN_DRAW_SAMPLE_SPACING_IN = 0.25;
-export const MIN_DRAW_SEGMENT_LEN_IN = 0.5;
-export const DRAW_SIMPLIFY_TOLERANCE_IN = 0.2;
+const toString = (value, fallback) => (typeof value === "string" ? value : fallback);
+
+const toObject = (value, fallback) => {
+    if (!isPlainObject(value)) return { ...fallback };
+    return { ...fallback, ...value };
+};
+
+const cloneArray = (value) => value.map((entry) => (isPlainObject(entry) ? { ...entry } : entry));
+
+const toArray = (value, fallback) => (Array.isArray(value) ? cloneArray(value) : cloneArray(fallback));
+
+const buildHubUrl = (ip, port, path) => `http://${ip}:${port}${path}`;
+
+export let FIELD_SIZE_IN = DEFAULT_CONFIG.FIELD_SIZE_IN;
+export let FIELD_EDGE_IN = FIELD_SIZE_IN / 2;
+
+export let DEFAULT_CANVAS_SIZE = DEFAULT_CONFIG.DEFAULT_CANVAS_SIZE;
+export let DEFAULT_LEFT_PANEL_WIDTH = DEFAULT_CONFIG.DEFAULT_LEFT_PANEL_WIDTH;
+export let DEFAULT_RIGHT_PANEL_WIDTH = DEFAULT_CONFIG.DEFAULT_RIGHT_PANEL_WIDTH;
+export let MIN_LEFT_PANEL_WIDTH = DEFAULT_CONFIG.MIN_LEFT_PANEL_WIDTH;
+export let MIN_RIGHT_PANEL_WIDTH = DEFAULT_CONFIG.MIN_RIGHT_PANEL_WIDTH;
+
+export let GRID_DEFAULT_STEP = DEFAULT_CONFIG.GRID_DEFAULT_STEP;
+export let GRID_MIN_STEP = DEFAULT_CONFIG.GRID_MIN_STEP;
+export let DEFAULT_SNAP_IN = DEFAULT_CONFIG.DEFAULT_SNAP_IN;
+
+export let DEFAULT_TOLERANCE_IN = DEFAULT_CONFIG.DEFAULT_TOLERANCE_IN;
+export let DEFAULT_VELOCITY_IN_PER_S = DEFAULT_CONFIG.DEFAULT_VELOCITY_IN_PER_S;
+export let DEFAULT_PLAYBACK_SPEED_IN_PER_S = DEFAULT_CONFIG.DEFAULT_PLAYBACK_SPEED_IN_PER_S;
+export let DEFAULT_MAX_ACCEL_IN_PER_S2 = DEFAULT_CONFIG.DEFAULT_MAX_ACCEL_IN_PER_S2;
+export let SPEED_PROFILE_SAMPLE_STEP_IN = DEFAULT_CONFIG.SPEED_PROFILE_SAMPLE_STEP_IN;
+export let EPS = DEFAULT_CONFIG.EPS;
+
+export let DEFAULT_ROBOT_DIMENSIONS = { ...DEFAULT_CONFIG.DEFAULT_ROBOT_DIMENSIONS };
+
+export let POSE_POLL_INTERVAL_MS = DEFAULT_CONFIG.POSE_POLL_INTERVAL_MS;
+export let HUB_IP = DEFAULT_CONFIG.HUB_IP;
+export let HUB_PORT = DEFAULT_CONFIG.HUB_PORT;
+export let HUB_POINTS_URL = buildHubUrl(HUB_IP, HUB_PORT, "/points");
+export let HUB_POSE_URL = buildHubUrl(HUB_IP, HUB_PORT, "/pose");
+export let HUB_RUN_URL = buildHubUrl(HUB_IP, HUB_PORT, "/run");
+export let LIVE_POSE_SYNC_PREFIX = DEFAULT_CONFIG.LIVE_POSE_SYNC_PREFIX;
+
+export let UPLOAD_RESET_OK_MS = DEFAULT_CONFIG.UPLOAD_RESET_OK_MS;
+export let UPLOAD_RESET_FAIL_MS = DEFAULT_CONFIG.UPLOAD_RESET_FAIL_MS;
+
+export let PATH_SAMPLE_STEP_IN = DEFAULT_CONFIG.PATH_SAMPLE_STEP_IN;
+export let BEZIER_MIN_SAMPLES = DEFAULT_CONFIG.BEZIER_MIN_SAMPLES;
+export let BEZIER_MAX_SAMPLES = DEFAULT_CONFIG.BEZIER_MAX_SAMPLES;
+export let ARC_MAX_SAMPLES = DEFAULT_CONFIG.ARC_MAX_SAMPLES;
+export let MIN_DRAW_SAMPLE_SPACING_IN = DEFAULT_CONFIG.MIN_DRAW_SAMPLE_SPACING_IN;
+export let MIN_DRAW_SEGMENT_LEN_IN = DEFAULT_CONFIG.MIN_DRAW_SEGMENT_LEN_IN;
+export let DRAW_SIMPLIFY_TOLERANCE_IN = DEFAULT_CONFIG.DRAW_SIMPLIFY_TOLERANCE_IN;
 
 export const TWO_PI = Math.PI * 2;
 
-// === Palette ===
-export const PATH_COLOR = "#5cd2ff";
-export const START_COLOR = "#ffd166";
-export const WAYPOINT_COLOR = "#cbd5e1";
-export const LAST_POINT_COLOR = "#ffffff";
-export const FOOTPRINT_FILL = "#6be675";
-export const LIVE_POSE_FILL = "#ff6ad5";
-export const PREVIEW_FILL = "#94e2b8";
-export const DRAW_RAW_COLOR = "#94a3b8";
-export const DRAW_FIT_COLOR = "#38bdf8";
-export const DRAW_LABEL_FILL = "rgba(15,23,42,0.82)";
-export const DRAW_LABEL_STROKE = "rgba(255,255,255,0.8)";
+export let PATH_COLOR = DEFAULT_CONFIG.PATH_COLOR;
+export let START_COLOR = DEFAULT_CONFIG.START_COLOR;
+export let WAYPOINT_COLOR = DEFAULT_CONFIG.WAYPOINT_COLOR;
+export let LAST_POINT_COLOR = DEFAULT_CONFIG.LAST_POINT_COLOR;
+export let FOOTPRINT_FILL = DEFAULT_CONFIG.FOOTPRINT_FILL;
+export let LIVE_POSE_FILL = DEFAULT_CONFIG.LIVE_POSE_FILL;
+export let PREVIEW_FILL = DEFAULT_CONFIG.PREVIEW_FILL;
+export let DRAW_RAW_COLOR = DEFAULT_CONFIG.DRAW_RAW_COLOR;
+export let DRAW_FIT_COLOR = DEFAULT_CONFIG.DRAW_FIT_COLOR;
+export let DRAW_LABEL_FILL = DEFAULT_CONFIG.DRAW_LABEL_FILL;
+export let DRAW_LABEL_STROKE = DEFAULT_CONFIG.DRAW_LABEL_STROKE;
 
-export const HUB_WS_PORT = 8000;
+export let HUB_WS_PORT = DEFAULT_CONFIG.HUB_WS_PORT;
+
+export let TAG_TEMPLATES = cloneArray(DEFAULT_CONFIG.TAG_TEMPLATES);
+
+export const getInlineConfig = () => {
+    if (typeof window === "undefined") return null;
+    const inline = window.__APP_CONFIG__;
+    return isPlainObject(inline) ? inline : null;
+};
+export const applyRuntimeConfig = (overrides = {}) => {
+    const merged = {
+        ...DEFAULT_CONFIG,
+        ...(isPlainObject(overrides) ? overrides : {}),
+    };
+
+    FIELD_SIZE_IN = toNumber(merged.FIELD_SIZE_IN, DEFAULT_CONFIG.FIELD_SIZE_IN);
+    FIELD_EDGE_IN = FIELD_SIZE_IN / 2;
+
+    DEFAULT_CANVAS_SIZE = toNumber(merged.DEFAULT_CANVAS_SIZE, DEFAULT_CONFIG.DEFAULT_CANVAS_SIZE);
+    DEFAULT_LEFT_PANEL_WIDTH = toNumber(merged.DEFAULT_LEFT_PANEL_WIDTH, DEFAULT_CONFIG.DEFAULT_LEFT_PANEL_WIDTH);
+    DEFAULT_RIGHT_PANEL_WIDTH = toNumber(merged.DEFAULT_RIGHT_PANEL_WIDTH, DEFAULT_CONFIG.DEFAULT_RIGHT_PANEL_WIDTH);
+    MIN_LEFT_PANEL_WIDTH = toNumber(merged.MIN_LEFT_PANEL_WIDTH, DEFAULT_CONFIG.MIN_LEFT_PANEL_WIDTH);
+    MIN_RIGHT_PANEL_WIDTH = toNumber(merged.MIN_RIGHT_PANEL_WIDTH, DEFAULT_CONFIG.MIN_RIGHT_PANEL_WIDTH);
+
+    GRID_DEFAULT_STEP = toNumber(merged.GRID_DEFAULT_STEP, DEFAULT_CONFIG.GRID_DEFAULT_STEP);
+    GRID_MIN_STEP = toNumber(merged.GRID_MIN_STEP, DEFAULT_CONFIG.GRID_MIN_STEP);
+    DEFAULT_SNAP_IN = toNumber(merged.DEFAULT_SNAP_IN, DEFAULT_CONFIG.DEFAULT_SNAP_IN);
+
+    DEFAULT_TOLERANCE_IN = toNumber(merged.DEFAULT_TOLERANCE_IN, DEFAULT_CONFIG.DEFAULT_TOLERANCE_IN);
+    DEFAULT_VELOCITY_IN_PER_S = toNumber(merged.DEFAULT_VELOCITY_IN_PER_S, DEFAULT_CONFIG.DEFAULT_VELOCITY_IN_PER_S);
+    DEFAULT_PLAYBACK_SPEED_IN_PER_S = toNumber(
+        merged.DEFAULT_PLAYBACK_SPEED_IN_PER_S,
+        DEFAULT_CONFIG.DEFAULT_PLAYBACK_SPEED_IN_PER_S
+    );
+    DEFAULT_MAX_ACCEL_IN_PER_S2 = toNumber(merged.DEFAULT_MAX_ACCEL_IN_PER_S2, DEFAULT_CONFIG.DEFAULT_MAX_ACCEL_IN_PER_S2);
+    SPEED_PROFILE_SAMPLE_STEP_IN = toNumber(
+        merged.SPEED_PROFILE_SAMPLE_STEP_IN,
+        DEFAULT_CONFIG.SPEED_PROFILE_SAMPLE_STEP_IN
+    );
+    EPS = toNumber(merged.EPS, DEFAULT_CONFIG.EPS);
+
+    DEFAULT_ROBOT_DIMENSIONS = toObject(merged.DEFAULT_ROBOT_DIMENSIONS, DEFAULT_CONFIG.DEFAULT_ROBOT_DIMENSIONS);
+
+    POSE_POLL_INTERVAL_MS = toNumber(merged.POSE_POLL_INTERVAL_MS, DEFAULT_CONFIG.POSE_POLL_INTERVAL_MS);
+    HUB_IP = toString(merged.HUB_IP, DEFAULT_CONFIG.HUB_IP);
+    HUB_PORT = toNumber(merged.HUB_PORT, DEFAULT_CONFIG.HUB_PORT);
+
+    const fallbackPointsUrl = buildHubUrl(HUB_IP, HUB_PORT, "/points");
+    const fallbackPoseUrl = buildHubUrl(HUB_IP, HUB_PORT, "/pose");
+    const fallbackRunUrl = buildHubUrl(HUB_IP, HUB_PORT, "/run");
+
+    HUB_POINTS_URL = toString(merged.HUB_POINTS_URL, fallbackPointsUrl);
+    HUB_POSE_URL = toString(merged.HUB_POSE_URL, fallbackPoseUrl);
+    HUB_RUN_URL = toString(merged.HUB_RUN_URL, fallbackRunUrl);
+    LIVE_POSE_SYNC_PREFIX = toString(merged.LIVE_POSE_SYNC_PREFIX, DEFAULT_CONFIG.LIVE_POSE_SYNC_PREFIX);
+
+    UPLOAD_RESET_OK_MS = toNumber(merged.UPLOAD_RESET_OK_MS, DEFAULT_CONFIG.UPLOAD_RESET_OK_MS);
+    UPLOAD_RESET_FAIL_MS = toNumber(merged.UPLOAD_RESET_FAIL_MS, DEFAULT_CONFIG.UPLOAD_RESET_FAIL_MS);
+
+    PATH_SAMPLE_STEP_IN = toNumber(merged.PATH_SAMPLE_STEP_IN, DEFAULT_CONFIG.PATH_SAMPLE_STEP_IN);
+    BEZIER_MIN_SAMPLES = toNumber(merged.BEZIER_MIN_SAMPLES, DEFAULT_CONFIG.BEZIER_MIN_SAMPLES);
+    BEZIER_MAX_SAMPLES = toNumber(merged.BEZIER_MAX_SAMPLES, DEFAULT_CONFIG.BEZIER_MAX_SAMPLES);
+    ARC_MAX_SAMPLES = toNumber(merged.ARC_MAX_SAMPLES, DEFAULT_CONFIG.ARC_MAX_SAMPLES);
+    MIN_DRAW_SAMPLE_SPACING_IN = toNumber(
+        merged.MIN_DRAW_SAMPLE_SPACING_IN,
+        DEFAULT_CONFIG.MIN_DRAW_SAMPLE_SPACING_IN
+    );
+    MIN_DRAW_SEGMENT_LEN_IN = toNumber(merged.MIN_DRAW_SEGMENT_LEN_IN, DEFAULT_CONFIG.MIN_DRAW_SEGMENT_LEN_IN);
+    DRAW_SIMPLIFY_TOLERANCE_IN = toNumber(
+        merged.DRAW_SIMPLIFY_TOLERANCE_IN,
+        DEFAULT_CONFIG.DRAW_SIMPLIFY_TOLERANCE_IN
+    );
+
+    PATH_COLOR = toString(merged.PATH_COLOR, DEFAULT_CONFIG.PATH_COLOR);
+    START_COLOR = toString(merged.START_COLOR, DEFAULT_CONFIG.START_COLOR);
+    WAYPOINT_COLOR = toString(merged.WAYPOINT_COLOR, DEFAULT_CONFIG.WAYPOINT_COLOR);
+    LAST_POINT_COLOR = toString(merged.LAST_POINT_COLOR, DEFAULT_CONFIG.LAST_POINT_COLOR);
+    FOOTPRINT_FILL = toString(merged.FOOTPRINT_FILL, DEFAULT_CONFIG.FOOTPRINT_FILL);
+    LIVE_POSE_FILL = toString(merged.LIVE_POSE_FILL, DEFAULT_CONFIG.LIVE_POSE_FILL);
+    PREVIEW_FILL = toString(merged.PREVIEW_FILL, DEFAULT_CONFIG.PREVIEW_FILL);
+    DRAW_RAW_COLOR = toString(merged.DRAW_RAW_COLOR, DEFAULT_CONFIG.DRAW_RAW_COLOR);
+    DRAW_FIT_COLOR = toString(merged.DRAW_FIT_COLOR, DEFAULT_CONFIG.DRAW_FIT_COLOR);
+    DRAW_LABEL_FILL = toString(merged.DRAW_LABEL_FILL, DEFAULT_CONFIG.DRAW_LABEL_FILL);
+    DRAW_LABEL_STROKE = toString(merged.DRAW_LABEL_STROKE, DEFAULT_CONFIG.DRAW_LABEL_STROKE);
+
+    HUB_WS_PORT = toNumber(merged.HUB_WS_PORT, DEFAULT_CONFIG.HUB_WS_PORT);
+
+    TAG_TEMPLATES = toArray(merged.TAG_TEMPLATES, DEFAULT_CONFIG.TAG_TEMPLATES);
+
+    return merged;
+};
+
+export const loadRuntimeConfig = async () => {
+    const inline = getInlineConfig();
+    if (inline) {
+        applyRuntimeConfig(inline);
+        return inline;
+    }
+    return DEFAULT_CONFIG;
+};
+
+applyRuntimeConfig();
+
+
+
+
 
 

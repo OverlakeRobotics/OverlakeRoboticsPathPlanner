@@ -1,13 +1,13 @@
-import { useState, useRef, useEffect } from "react";
-
+import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { TAG_TEMPLATES } from "../../constants/config";
 const uploadLabel = (status) =>
-    status === "sending" ? "Uploading…" : status === "ok" ? "Uploaded" : status === "fail" ? "Failed Upload" : "Upload";
+    status === "sending" ? "Uploading..." : status === "ok" ? "Uploaded" : status === "fail" ? "Failed Upload" : "Upload";
 
 const uploadClass = (status) =>
     status === "ok" ? "btn ok" : status === "fail" ? "btn danger" : status === "sending" ? "btn warn" : "btn primary";
 
 const runLabel = (status) =>
-    status === "sending" ? "Queuing…" : status === "ok" ? "Queued" : status === "fail" ? "Failed Run" : "Run";
+    status === "sending" ? "Queuing..." : status === "ok" ? "Queued" : status === "fail" ? "Failed Run" : "Run";
 
 const runClass = (status) =>
     status === "ok"
@@ -40,12 +40,20 @@ export default function RunPanel({
                                      onEditTag,
                                      onReorderTags,
                                      onAddTag,
+                                     onReorderPoints,
+                                     onTogglePointExpand,
+                                     expandedPointIndex,
+                                     onUpdatePoint,
                                      // NEW:
                                      estTimeSec,
                                      onExportPath,
                                      onImportFile,
                                      points,
+                                     segments,
+                                     alliance,
+                                     onAllianceChange,
                                      onSwitchSides,
+                                     globalVars = [],
                                      // WebSocket & Robot Status
                                      isConnected,
                                      robotStatus,
@@ -54,6 +62,9 @@ export default function RunPanel({
                                      onInit,
                                      onStart,
                                      onStopOpMode,
+                                     onUpdateSegmentControl,
+                                     onUpdateSegmentMid,
+                                     onUpdateSegmentHeadingMode,
                                  }) {
     useEffect(() => {
         console.log('[RunPanel] Rendered. isConnected:', isConnected, 'robotStatus:', robotStatus, 'disabled:', robotStatus?.status === 'RUNNING');
@@ -70,18 +81,79 @@ export default function RunPanel({
     const [editingIndex, setEditingIndex] = useState(null);
     const [editName, setEditName] = useState("");
     const [editValue, setEditValue] = useState(0);
+    const [editValueSource, setEditValueSource] = useState("manual");
+    const [editGlobalName, setEditGlobalName] = useState("");
     const [editPointIndex, setEditPointIndex] = useState(0);
     const [draggedIndex, setDraggedIndex] = useState(null);
     const [dragOverIndex, setDragOverIndex] = useState(null);
-    const [expandedPoints, setExpandedPoints] = useState({});
+    const [draggedPointIndex, setDraggedPointIndex] = useState(null);
     // Selected op mode must be chosen before initializing the robot
     const [selectedOpMode, setSelectedOpMode] = useState("");
 
     const [isAddingTag, setIsAddingTag] = useState(false);
     const [newTagName, setNewTagName] = useState("");
     const [newTagValue, setNewTagValue] = useState("");
+    const [newTagValueSource, setNewTagValueSource] = useState("manual");
+    const [newTagGlobalName, setNewTagGlobalName] = useState("");
     const [newTagPointIndex, setNewTagPointIndex] = useState("");
 
+    const [closingPointIndex, setClosingPointIndex] = useState(null);
+    const closingTimerRef = useRef(null);
+    const prevExpandedRef = useRef(expandedPointIndex);
+    const pointDragGhostRef = useRef(null);
+
+    useLayoutEffect(() => {
+        const prev = prevExpandedRef.current;
+        if (prev !== null && prev !== expandedPointIndex) {
+            if (closingTimerRef.current) {
+                clearTimeout(closingTimerRef.current);
+            }
+            setClosingPointIndex(prev);
+            closingTimerRef.current = setTimeout(() => {
+                setClosingPointIndex(null);
+                closingTimerRef.current = null;
+            }, 200);
+        }
+        prevExpandedRef.current = expandedPointIndex;
+    }, [expandedPointIndex]);
+
+    useEffect(() => () => {
+        if (closingTimerRef.current) {
+            clearTimeout(closingTimerRef.current);
+        }
+    }, []);
+
+    const handlePointDragStart = (event, pointIndex) => {
+        setDraggedPointIndex(pointIndex);
+        if (!event.dataTransfer) return;
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", String(pointIndex));
+
+        const source = event.currentTarget;
+        if (!(source instanceof HTMLElement)) return;
+        const rect = source.getBoundingClientRect();
+        const ghost = source.cloneNode(true);
+        ghost.classList.add("drag-ghost");
+        ghost.style.width = `${rect.width}px`;
+        ghost.style.maxWidth = `${rect.width}px`;
+        ghost.style.position = "fixed";
+        ghost.style.top = "-1000px";
+        ghost.style.left = "-1000px";
+        ghost.style.pointerEvents = "none";
+        ghost.style.opacity = "0.9";
+        ghost.style.zIndex = "9999";
+        document.body.appendChild(ghost);
+        pointDragGhostRef.current = ghost;
+        event.dataTransfer.setDragImage(ghost, 20, 20);
+    };
+
+    const handlePointDragEnd = () => {
+        setDraggedPointIndex(null);
+        if (pointDragGhostRef.current) {
+            pointDragGhostRef.current.remove();
+            pointDragGhostRef.current = null;
+        }
+    };
     // Group tags by point index
     const tagsByPoint = tags.reduce((acc, tag, index) => {
         const pointIndex = tag.index - 1; // Convert to 0-based
@@ -92,12 +164,15 @@ export default function RunPanel({
         return acc;
     }, {});
 
-    const togglePointExpansion = (pointIndex) => {
-        setExpandedPoints((prev) => ({
-            ...prev,
-            [pointIndex]: !prev[pointIndex]
-        }));
+    const resolveTagValue = (tag) => {
+        if (tag?.globalName) {
+            const match = globalVars?.find((entry) => entry.name === tag.globalName);
+            const resolved = Number(match?.value);
+            if (Number.isFinite(resolved)) return resolved;
+        }
+        return Number(tag?.value) || 0;
     };
+
 
     // Keep a ref to the latest robotStatus for async waiting checks
     const robotStatusRef = useRef(robotStatus);
@@ -264,13 +339,13 @@ export default function RunPanel({
                                         </div>
                                     </div>
                                     {/* OpMode selector sourced from robotConfig.opModeList when available */}
-                                    {robotConfig?.opModeList?.length > 0 && (
-                                        <div style={{gridColumn: 'span 2', marginTop: '0.5rem'}}>
-                                            <label style={{display: 'block', fontSize: '0.75rem', opacity: 0.8, marginBottom: '0.25rem'}}>Select OpMode</label>
-                                            <div style={{width: '100%', maxHeight: 140, overflowY: 'auto', padding: '0.25rem', borderRadius: 6, border: '1px solid rgba(0,0,0,0.06)'}}>
-                                                {robotConfig.opModeList.map((m, i) => (
-                                                    <div
-                                                        key={i}
+                                            {robotConfig?.opModeList?.length > 0 && (
+                                                <div style={{gridColumn: 'span 2', marginTop: '0.5rem'}}>
+                                                    <label style={{display: 'block', fontSize: '0.75rem', opacity: 0.8, marginBottom: '0.25rem'}}>Select OpMode</label>
+                                                    <div style={{width: '100%', maxHeight: 140, overflowY: 'auto', padding: '0.25rem', borderRadius: 6, border: '1px solid rgba(0,0,0,0.06)'}}>
+                                                        {robotConfig.opModeList.map((m, i) => (
+                                                            <div
+                                                                key={i}
                                                         role="button"
                                                         tabIndex={0}
                                                         onClick={() => setSelectedOpMode(m)}
@@ -286,10 +361,10 @@ export default function RunPanel({
                                                     >
                                                         {m}
                                                     </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
                                 </div>
                             )}
                         </div>
@@ -301,7 +376,7 @@ export default function RunPanel({
                                     className="btn ok"
                                     onClick={handleInitStartClick}
                                 >
-                                    {(initialized || hasSentInit) ? '▶ Start' : 'Init'}
+                                    {(initialized || hasSentInit) ? '? Start' : 'Init'}
                                 </button>
                                 <button 
                                     className="btn danger" 
@@ -326,6 +401,29 @@ export default function RunPanel({
 
                 <section className="control-card">
                     <div className="card-header">
+                        <h3>Import / Export</h3>
+                        <p>Save or import path.</p>
+                    </div>
+                    <div className="card-actions stack">
+                        <button className="btn primary" onClick={onExportPath}>
+                            Export JSON
+                        </button>
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept="application/json,.json"
+                            className="input"
+                            onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                if (f) onImportFile(f);
+                                e.currentTarget.value = "";
+                            }}
+                        />
+                    </div>
+                </section>
+
+                <section className="control-card">
+                    <div className="card-header">
                         <h3>Playback</h3>
                         <p>Preview the route before committing to the field.</p>
                     </div>
@@ -345,14 +443,14 @@ export default function RunPanel({
                     <div className="progress-line">
                         <span className="small">Progress</span>
                         <span className="small">
-              {progress}% • {toFixed(playDist, 1)} / {lengthDisplay} in
+              {progress}% of {toFixed(playDist, 1)} / {lengthDisplay} in
             </span>
                     </div>
                 </section>
 
                 <section className="control-card">
                     <div className="card-header">
-                        <h3>Tags</h3>
+                        <h3>Points and Tags</h3>
                         <p>Organize actions by path point</p>
                     </div>
                     {points.length === 0 ? (
@@ -360,38 +458,152 @@ export default function RunPanel({
                     ) : (
                         <>
                             {points.map((point, pointIndex) => {
-                        const pointTags = tagsByPoint[pointIndex] || [];
-                        const isExpanded = expandedPoints[pointIndex];
+                                const pointTags = tagsByPoint[pointIndex] || [];
+                                const segment = segments?.[pointIndex];
+                                const typeLabel = segment?.type === "bezier" ? "Bezier" : segment?.type === "arc" ? "Arc" : "Line";
+                                const isExpanded = expandedPointIndex === pointIndex;
+                                const isClosing = closingPointIndex === pointIndex;
 
-                        return (
-                            <div key={pointIndex} className="point-section">
-                                <div
-                                    className="point-header"
-                                    role="button"
+                                return (
+                                    <div
+                                        key={pointIndex}
+                                        className="point-section"
+                                        draggable={pointsCount > 1}
+                                        onDragStart={(event) => handlePointDragStart(event, pointIndex)}
+                                        onDragOver={(event) => {
+                                            if (draggedPointIndex === null) return;
+                                            event.preventDefault();
+                                        }}
+                                        onDrop={() => {
+                                            if (draggedPointIndex === null) return;
+                                            if (onReorderPoints) onReorderPoints(draggedPointIndex, pointIndex);
+                                            setDraggedPointIndex(null);
+                                        }}
+                                        onDragEnd={handlePointDragEnd}
+                                    >
+                                        <div
+                                            className="point-header"
+                                            role="button"
                                     tabIndex={0}
                                     aria-expanded={isExpanded}
-                                    onClick={() => togglePointExpansion(pointIndex)}
+                                        onClick={() => onTogglePointExpand?.(pointIndex)}
                                     onKeyDown={(event) => {
                                         if (event.key === "Enter" || event.key === " ") {
                                             event.preventDefault();
-                                            togglePointExpansion(pointIndex);
+                                            onTogglePointExpand?.(pointIndex);
                                         }
                                     }}
                                 >
                                     <div>
-                                        <h4>Point {pointIndex + 1}</h4>
-                                        <p>({point.x?.toFixed(1) || "0"}, {point.y?.toFixed(1) || "0"}){point.h !== undefined ? ` • ${point.h}°` : ""}</p>
+                                        <h4>Point {pointIndex + 1}{typeLabel ? ` - ${typeLabel}` : ""}</h4>
+                                        <p>({formatNumber(point.x, 1) || "0"}, {formatNumber(point.y, 1) || "0"}){point.h !== undefined ? ` (heading ${formatNumber(point.h, 1)} deg)` : ""}</p>
                                         {pointTags.length > 0 && (
                                             <p className="tag-count">{pointTags.length} tag{pointTags.length !== 1 ? 's' : ''}</p>
                                         )}
                                     </div>
-                                    <span className="collapse-caret">{isExpanded ? "▾" : "▸"}</span>
-                                </div>
+                                            <span className="collapse-caret">{isExpanded ? "\u25BE" : "\u25B8"}</span>
+                                        </div>
 
-                                {isExpanded && (
-                                    <div className="point-tags-content">
-                                        {pointTags.length > 0 ? (
-                                            <div className="point-tag-list">
+                                        {(isExpanded || isClosing) && (
+                                            <div
+                                                className={`point-tags-shell${isExpanded ? " open" : ""}${isClosing ? " closing" : ""}`}
+                                            >
+                                                <div className="point-tags-content">
+                                                <div className="field-grid">
+                                                    <div className="field">
+                                                        <label>X (in)</label>
+                                                        <NumberField
+                                                            value={point.x ?? 0}
+                                                            step="0.1"
+                                                            onCommit={(value) => onUpdatePoint?.(pointIndex, { x: value })}
+                                                        />
+                                                    </div>
+                                                    <div className="field">
+                                                        <label>Y (in)</label>
+                                                        <NumberField
+                                                            value={point.y ?? 0}
+                                                            step="0.1"
+                                                            onCommit={(value) => onUpdatePoint?.(pointIndex, { y: value })}
+                                                        />
+                                                    </div>
+                                                    {segment?.type === "bezier" || segment?.type === "arc" ? (
+                                                        <>
+                                                            <div className="field">
+                                                                <label>Heading strategy</label>
+                                                                <select
+                                                                    value={segment.headingMode || "straight"}
+                                                                    onChange={(e) => onUpdateSegmentHeadingMode?.(pointIndex, e.target.value)}
+                                                                >
+                                                                    <option value="straight">Straight</option>
+                                                                    <option value="tangent">Tangent</option>
+                                                                    <option value="orth-left">Orthogonal L</option>
+                                                                    <option value="orth-right">Orthogonal R</option>
+                                                                </select>
+                                                            </div>
+                                                            {(segment.headingMode || "straight") === "straight" && (
+                                                                <div className="field">
+                                                                    <label>Heading (deg)</label>
+                                                                    <NumberField
+                                                                value={point.h ?? 0}
+                                                                step="1"
+                                                                onCommit={(value) => onUpdatePoint?.(pointIndex, { h: value })}
+                                                            />
+                                                                </div>
+                                                            )}
+                                                        </>
+                                                    ) : (
+                                                        <div className="field">
+                                                            <label>Heading (deg)</label>
+                                                            <NumberField
+                                                                value={point.h ?? 0}
+                                                                step="1"
+                                                                onCommit={(value) => onUpdatePoint?.(pointIndex, { h: value })}
+                                                            />
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                {segment?.type === "bezier" && (
+                                                    <div className="field-grid" style={{marginTop: "10px"}}>
+                                                        <div className="field">
+                                                            <label>Control X (in)</label>
+                                                            <NumberField
+                                                                value={segment.control?.x ?? 0}
+                                                                step="0.1"
+                                                                onCommit={(value) => onUpdateSegmentControl?.(pointIndex, { x: value })}
+                                                            />
+                                                        </div>
+                                                        <div className="field">
+                                                            <label>Control Y (in)</label>
+                                                            <NumberField
+                                                                value={segment.control?.y ?? 0}
+                                                                step="0.1"
+                                                                onCommit={(value) => onUpdateSegmentControl?.(pointIndex, { y: value })}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {segment?.type === "arc" && (
+                                                    <div className="field-grid" style={{marginTop: "10px"}}>
+                                                        <div className="field">
+                                                            <label>Mid X (in)</label>
+                                                            <NumberField
+                                                                value={segment.mid?.x ?? 0}
+                                                                step="0.1"
+                                                                onCommit={(value) => onUpdateSegmentMid?.(pointIndex, { x: value })}
+                                                            />
+                                                        </div>
+                                                        <div className="field">
+                                                            <label>Mid Y (in)</label>
+                                                            <NumberField
+                                                                value={segment.mid?.y ?? 0}
+                                                                step="0.1"
+                                                                onCommit={(value) => onUpdateSegmentMid?.(pointIndex, { y: value })}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {pointTags.length > 0 ? (
+                                                    <div className="point-tag-list">
                                                 {pointTags.map((tag) => {
                                                     const isEditing = editingIndex === tag.originalIndex;
 
@@ -440,13 +652,18 @@ export default function RunPanel({
                                                             {isEditing ? (
                                                                 <>
                                                                     <div className="field">
-                                                                        <label>Tag Name</label>
-                                                                        <input
-                                                                            type="text"
+                                                                        <label>Tag</label>
+                                                                        <select
                                                                             value={editName}
                                                                             onChange={(e) => setEditName(e.target.value)}
-                                                                            autoFocus
-                                                                        />
+                                                                        >
+                                                                            <option value="">-- Select Tag Type --</option>
+                                                                            {TAG_TEMPLATES.map((template) => (
+                                                                                <option key={template.name} value={template.name}>
+                                                                                    {template.name}{template.unit ? ` - ${template.unit}` : ""}
+                                                                                </option>
+                                                                            ))}
+                                                                        </select>
                                                                     </div>
                                                                     <div className="field-grid">
                                                                         <div className="field">
@@ -455,28 +672,49 @@ export default function RunPanel({
                                                                                 type="number"
                                                                                 value={editValue}
                                                                                 onChange={(e) => setEditValue(Number(e.target.value))}
+                                                                                disabled={editValueSource === "global"}
                                                                             />
                                                                         </div>
                                                                         <div className="field">
-                                                                            <label>Point #</label>
-                                                                            <input
-                                                                                type="number"
-                                                                                min="1"
-                                                                                max={pointsCount}
-                                                                                value={editPointIndex}
-                                                                                onChange={(e) => setEditPointIndex(Number(e.target.value))}
-                                                                            />
+                                                                            <label>Value source</label>
+                                                                            <select
+                                                                                value={editValueSource}
+                                                                                onChange={(e) => setEditValueSource(e.target.value)}
+                                                                            >
+                                                                                <option value="manual">Manual</option>
+                                                                                <option value="global" disabled={!globalVars?.length}>Global variable</option>
+                                                                            </select>
                                                                         </div>
-                                                                    </div>
-                                                                    <div className="point-tag-actions">
+                                                                        {editValueSource === "global" && (
+                                                                            <div className="field">
+                                                                                <label>Global variable</label>
+                                                                                <select
+                                                                                    value={editGlobalName}
+                                                                                    onChange={(e) => setEditGlobalName(e.target.value)}
+                                                                                >
+                                                                                    <option value="">-- Select global --</option>
+                                                                                    {globalVars?.map((entry) => (
+                                                                                        <option key={entry.name} value={entry.name}>
+                                                                                            {entry.name}
+                                                                                        </option>
+                                                                                    ))}
+                                                                                </select>
+                                                                            </div>
+                                                                        )}
+                                                </div>
+                                                <div className="point-tag-actions">
                                                                         <button
                                                                             className="btn primary"
                                                                             onClick={() => {
                                                                                 if (editName.trim() && onEditTag) {
-                                                                                    onEditTag(tag.originalIndex, editName.trim(), editValue, editPointIndex);
+                                                                                    const globalName = editValueSource === "global" ? editGlobalName : undefined;
+                                                                                    if (editValueSource !== "global" || globalName) {
+                                                                                        onEditTag(tag.originalIndex, editName.trim(), editValue, editPointIndex, globalName);
+                                                                                    }
                                                                                 }
                                                                                 setEditingIndex(null);
                                                                             }}
+                                                                            disabled={editValueSource === "global" && !editGlobalName}
                                                                         >
                                                                             Save
                                                                         </button>
@@ -491,11 +729,16 @@ export default function RunPanel({
                                                             ) : (
                                                                 <>
                                                                     <div className="point-tag-header">
-                                                                        <span className="drag-handle" title="Drag to reorder">⋮⋮</span>
+                                                                        <span className="drag-handle" title="Drag to reorder">::</span>
                                                                         <div style={{flex: 1, minWidth: 0}}>
                                                                             <span className="point-tag-name">{tag.name}</span>
                                                                             <div className="point-tag-value">
-                                                                                {tag.value} {tag.value !== tag.index && `• pt ${tag.index}`}
+                                                                                {(() => {
+                                                                                    const template = TAG_TEMPLATES.find((entry) => entry.name === tag.name);
+                                                                                    const unit = template?.unit ? ` ${template.unit}` : "";
+                                                                                    const valueLabel = tag.globalName ? `${tag.globalName}: ${resolveTagValue(tag)}` : resolveTagValue(tag);
+                                                                                    return `${valueLabel}${unit}`;
+                                                                                })()}
                                                                             </div>
                                                                         </div>
                                                                     </div>
@@ -506,6 +749,8 @@ export default function RunPanel({
                                                                                 setEditingIndex(tag.originalIndex);
                                                                                 setEditName(tag.name);
                                                                                 setEditValue(tag.value);
+                                                                                setEditValueSource(tag.globalName ? "global" : "manual");
+                                                                                setEditGlobalName(tag.globalName || "");
                                                                                 setEditPointIndex(tag.index);
                                                                             }}
                                                                         >
@@ -537,6 +782,8 @@ export default function RunPanel({
                                                     setNewTagName("");
                                                     setNewTagValue("");
                                                     setNewTagPointIndex(pointIndex + 1);
+                                                    setNewTagValueSource("manual");
+                                                    setNewTagGlobalName("");
                                                     setIsAddingTag(true);
                                                 }}
                                                 disabled={pointsCount === 0}
@@ -556,31 +803,21 @@ export default function RunPanel({
                                                             const selectedName = e.target.value;
                                                             setNewTagName(selectedName);
                                                             // Set default values based on tag type
-                                                            const defaults = {
-                                                                velocity: 50,
-                                                                pause: 1,
-                                                                intake: 0,
-                                                                autoAimRed: 0,
-                                                                autoAimBlue: 0,
-                                                                shooterVelocity: 0,
-                                                                hoodAngle: 0,
-                                                                launchArtifacts: 1,
-                                                            };
-                                                            if (defaults[selectedName] !== undefined) {
-                                                                setNewTagValue(defaults[selectedName]);
+                                                            const template = TAG_TEMPLATES.find((entry) => entry.name === selectedName);
+                                                            if (template && template.defaultValue !== undefined) {
+                                                                setNewTagValue(template.defaultValue);
+                                                            } else {
+                                                                setNewTagValue("");
                                                             }
                                                         }}
                                                         autoFocus
                                                     >
                                                         <option value="">-- Select Tag Type --</option>
-                                                        <option value="velocity">velocity - Robot speed (in/s)</option>
-                                                        <option value="pause">pause - Pause duration (sec)</option>
-                                                        <option value="intake">intake - Intake control</option>
-                                                        <option value="autoAimRed">autoAimRed - Red alliance aim</option>
-                                                        <option value="autoAimBlue">autoAimBlue - Blue alliance aim</option>
-                                                        <option value="shooterVelocity">shooterVelocity - Shooter speed</option>
-                                                        <option value="hoodAngle">hoodAngle - Hood angle (deg)</option>
-                                                        <option value="launchArtifacts">launchArtifacts - Launch duration (sec)</option>
+                                                        {TAG_TEMPLATES.map((template) => (
+                                                            <option key={template.name} value={template.name}>
+                                                                {template.name}{template.unit ? ` - ${template.unit}` : ""}
+                                                            </option>
+                                                        ))}
                                                     </select>
                                                 </div>
                                                 <div className="field-grid">
@@ -592,19 +829,35 @@ export default function RunPanel({
                                                             value={newTagValue}
                                                             onChange={(e) => setNewTagValue(e.target.value)}
                                                             placeholder="0"
+                                                            disabled={newTagValueSource === "global"}
                                                         />
                                                     </div>
                                                     <div className="field">
-                                                        <label>Point #</label>
-                                                        <input
-                                                            type="number"
-                                                            min="1"
-                                                            max={pointsCount}
-                                                            value={newTagPointIndex}
-                                                            onChange={(e) => setNewTagPointIndex(e.target.value)}
-                                                            placeholder={pointIndex + 1}
-                                                        />
+                                                        <label>Value source</label>
+                                                        <select
+                                                            value={newTagValueSource}
+                                                            onChange={(e) => setNewTagValueSource(e.target.value)}
+                                                        >
+                                                            <option value="manual">Manual</option>
+                                                            <option value="global" disabled={!globalVars?.length}>Global variable</option>
+                                                        </select>
                                                     </div>
+                                                    {newTagValueSource === "global" && (
+                                                        <div className="field">
+                                                            <label>Global variable</label>
+                                                            <select
+                                                                value={newTagGlobalName}
+                                                                onChange={(e) => setNewTagGlobalName(e.target.value)}
+                                                            >
+                                                                <option value="">-- Select global --</option>
+                                                                {globalVars?.map((entry) => (
+                                                                    <option key={entry.name} value={entry.name}>
+                                                                        {entry.name}
+                                                                    </option>
+                                                                ))}
+                                                            </select>
+                                                        </div>
+                                                    )}
                                                 </div>
                                                 <div className="point-tag-actions">
                                                     <button
@@ -613,14 +866,19 @@ export default function RunPanel({
                                                             if (newTagName.trim() && onAddTag) {
                                                                 const value = Number(newTagValue) || 0;
                                                                 const index = Math.max(1, Math.min(pointsCount, Number(newTagPointIndex) || pointIndex + 1));
-                                                                onAddTag(newTagName.trim(), value, index);
+                                                                const globalName = newTagValueSource === "global" ? newTagGlobalName : undefined;
+                                                                if (newTagValueSource !== "global" || globalName) {
+                                                                    onAddTag(newTagName.trim(), value, index, globalName);
+                                                                }
                                                                 setNewTagName("");
                                                                 setNewTagValue("");
                                                                 setNewTagPointIndex("");
+                                                                setNewTagValueSource("manual");
+                                                                setNewTagGlobalName("");
                                                                 setIsAddingTag(false);
                                                             }
                                                         }}
-                                                        disabled={!newTagName.trim()}
+                                                        disabled={!newTagName.trim() || (newTagValueSource === "global" && !newTagGlobalName)}
                                                     >
                                                         Add Tag
                                                     </button>
@@ -630,6 +888,8 @@ export default function RunPanel({
                                                             setNewTagName("");
                                                             setNewTagValue("");
                                                             setNewTagPointIndex("");
+                                                            setNewTagValueSource("manual");
+                                                            setNewTagGlobalName("");
                                                             setIsAddingTag(false);
                                                         }}
                                                     >
@@ -639,8 +899,9 @@ export default function RunPanel({
                                             </div>
                                         )}
                                     </div>
+                                </div>
                                 )}
-                            </div>
+                                    </div>
                         );
                     })}
                         </>
@@ -668,48 +929,27 @@ export default function RunPanel({
                         <p>Mirror path between Red and Blue Alliance.</p>
                     </div>
                     <div className="card-actions stack">
+                        <div className="field">
+                            <label>Alliance</label>
+                            <select
+                                value={alliance}
+                                onChange={(e) => onAllianceChange?.(e.target.value)}
+                            >
+                                <option value="red">Red</option>
+                                <option value="blue">Blue</option>
+                            </select>
+                        </div>
                         <button 
                             className="btn callout secondary" 
                             onClick={onSwitchSides}
                             disabled={pointsCount === 0}
                         >
-                            🔄 Switch Sides
+                            Switch Sides
                         </button>
                         <p className="helper-text">
-                            Flips all points vertically. Swaps autoAimRed ↔ autoAimBlue tags automatically.
+                            Mirrors all points and toggles the alliance parameter.
                         </p>
                     </div>
-                </section>
-
-                <section className="control-card">
-                    <div className="card-header">
-                        <h3>Import / Export</h3>
-                        <p>Save or import path.</p>
-                    </div>
-                    <div className="card-actions stack">
-                        <button className="btn primary" onClick={onExportPath}>
-                            Export JSON
-                        </button>
-                        <input
-                            ref={fileInputRef}
-                            type="file"
-                            accept="application/json,.json"
-                            className="input"
-                            onChange={(e) => {
-                                const f = e.target.files?.[0];
-                                if (f) onImportFile(f);
-                                e.currentTarget.value = "";
-                            }}
-                        />
-                    </div>
-                </section>
-
-                <section className="control-card">
-                    <div className="card-header">
-                        <h3>Generated Code</h3>
-                        <p>Paste into your robot's code to have the bot follow this path.</p>
-                    </div>
-                    <textarea className="code-box" readOnly value={code} />
                 </section>
             </div>
         </aside>
@@ -718,6 +958,50 @@ export default function RunPanel({
 
 
 
+const formatNumber = (value, precision = 3) => {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return "";
+    const fixed = num.toFixed(precision);
+    return fixed.replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
+};
+
+const NumberField = ({value, step = "0.1", onCommit}) => {
+    const [draft, setDraft] = useState(formatNumber(value));
+
+    useEffect(() => {
+        setDraft(formatNumber(value));
+    }, [value]);
+
+    const commitValue = () => {
+        if (draft === "" || draft === "-") {
+            setDraft(formatNumber(value));
+            return;
+        }
+        const next = Number(draft);
+        if (!Number.isFinite(next)) {
+            setDraft(formatNumber(value));
+            return;
+        }
+        onCommit?.(next);
+    };
+
+    return (
+        <input
+            type="text"
+            inputMode="decimal"
+            step={step}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commitValue}
+            onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                    commitValue();
+                    e.currentTarget.blur();
+                }
+            }}
+        />
+    );
+};
 const Stat = ({label, value}) => (
     <div className="stat-card">
         <span className="small stat-label">{label}</span>
@@ -726,3 +1010,43 @@ const Stat = ({label, value}) => (
 );
 
 const toFixed = (value, precision = 1) => Number(value || 0).toFixed(precision);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

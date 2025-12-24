@@ -1,19 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { TAG_TEMPLATES } from "../constants/config";
 
-const TAG_TEMPLATES = [
-  { name: "velocity", defaultValue: 50, unit: "in/s" },
-  { name: "pause", defaultValue: 1, unit: "seconds" },
-  { name: "intake", defaultValue: 0, unit: "velocity" },
-  { name: "autoAimRed", defaultValue: 0, unit: "" },
-  { name: "autoAimBlue", defaultValue: 0, unit: "" },
-  { name: "shooterVelocity", defaultValue: 0, unit: "velocity" },
-  { name: "hoodAngle", defaultValue: 0, unit: "degrees" },
-  { name: "launchArtifacts", defaultValue: 1, unit: "seconds" },
-];
-
-export default function TagModal({ isOpen, onClose, onAddTag, pointIndex, pointsCount }) {
+export default function TagModal({ isOpen, onClose, onAddTag, pointIndex, pointsCount, globalVars = [] }) {
   const [selectedTemplate, setSelectedTemplate] = useState("");
   const [tagValue, setTagValue] = useState(0);
+  const [valueSource, setValueSource] = useState("manual");
+  const [selectedGlobal, setSelectedGlobal] = useState("");
   const [addedTags, setAddedTags] = useState([]);
 
   if (!isOpen) return null;
@@ -26,21 +18,35 @@ export default function TagModal({ isOpen, onClose, onAddTag, pointIndex, points
     }
   };
 
+  useEffect(() => {
+    if (valueSource !== "global") return;
+    const match = globalVars?.find((entry) => entry.name === selectedGlobal);
+    if (match) setTagValue(Number(match.value) || 0);
+  }, [valueSource, selectedGlobal, globalVars]);
+
   const handleAddAnother = () => {
-    if (selectedTemplate) {
-      onAddTag(selectedTemplate, tagValue, pointIndex);
-      setAddedTags(prev => [...prev, { name: selectedTemplate, value: tagValue }]);
+    if (selectedTemplate && (valueSource !== "global" || selectedGlobal)) {
+      onAddTag(selectedTemplate, tagValue, pointIndex, valueSource === "global" ? selectedGlobal : undefined);
+      setAddedTags(prev => [...prev, {
+        name: selectedTemplate,
+        value: tagValue,
+        globalName: valueSource === "global" ? selectedGlobal : undefined,
+      }]);
       setSelectedTemplate("");
       setTagValue(0);
+      setValueSource("manual");
+      setSelectedGlobal("");
     }
   };
 
   const handleDone = () => {
-    if (selectedTemplate) {
-      onAddTag(selectedTemplate, tagValue, pointIndex);
+    if (selectedTemplate && (valueSource !== "global" || selectedGlobal)) {
+      onAddTag(selectedTemplate, tagValue, pointIndex, valueSource === "global" ? selectedGlobal : undefined);
     }
     setSelectedTemplate("");
     setTagValue(0);
+    setValueSource("manual");
+    setSelectedGlobal("");
     setAddedTags([]);
     onClose();
   };
@@ -48,6 +54,8 @@ export default function TagModal({ isOpen, onClose, onAddTag, pointIndex, points
   const handleSkip = () => {
     setSelectedTemplate("");
     setTagValue(0);
+    setValueSource("manual");
+    setSelectedGlobal("");
     setAddedTags([]);
     onClose();
   };
@@ -60,7 +68,7 @@ export default function TagModal({ isOpen, onClose, onAddTag, pointIndex, points
         <div className="modal-header">
           <h3>Add Tag to Point {pointIndex}</h3>
           <button className="modal-close" onClick={handleSkip} aria-label="Close">
-            ×
+            A-
           </button>
         </div>
 
@@ -70,7 +78,7 @@ export default function TagModal({ isOpen, onClose, onAddTag, pointIndex, points
               <strong>Tags added to point {pointIndex}:</strong>
               {addedTags.map((tag, idx) => (
                 <div key={idx} className="added-tag-item">
-                  {tag.name} = {tag.value}
+                  {tag.name} = {tag.globalName ? `${tag.globalName}: ${tag.value}` : tag.value}
                 </div>
               ))}
             </div>
@@ -102,9 +110,39 @@ export default function TagModal({ isOpen, onClose, onAddTag, pointIndex, points
                 type="number"
                 value={tagValue}
                 onChange={(e) => setTagValue(Number(e.target.value))}
-                disabled={!selectedTemplate}
+                disabled={!selectedTemplate || valueSource === "global"}
               />
             </div>
+
+            <div className="field">
+              <label>Value source</label>
+              <select
+                value={valueSource}
+                onChange={(e) => setValueSource(e.target.value)}
+                disabled={!selectedTemplate}
+              >
+                <option value="manual">Manual</option>
+                <option value="global" disabled={!globalVars?.length}>Global variable</option>
+              </select>
+            </div>
+
+            {valueSource === "global" && (
+              <div className="field">
+                <label>Global variable</label>
+                <select
+                  value={selectedGlobal}
+                  onChange={(e) => setSelectedGlobal(e.target.value)}
+                  disabled={!selectedTemplate}
+                >
+                  <option value="">-- Select global --</option>
+                  {globalVars?.map((entry) => (
+                    <option key={entry.name} value={entry.name}>
+                      {entry.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
         </div>
 
@@ -116,6 +154,7 @@ export default function TagModal({ isOpen, onClose, onAddTag, pointIndex, points
             <button
               className="btn ghost"
               onClick={handleAddAnother}
+              disabled={valueSource === "global" && !selectedGlobal}
             >
               Add & Continue
             </button>
@@ -123,7 +162,7 @@ export default function TagModal({ isOpen, onClose, onAddTag, pointIndex, points
           <button
             className="btn primary"
             onClick={handleDone}
-            disabled={!selectedTemplate && addedTags.length === 0}
+            disabled={(!selectedTemplate && addedTags.length === 0) || (valueSource === "global" && !selectedGlobal && selectedTemplate)}
           >
             {selectedTemplate ? "Add & Done" : "Done"}
           </button>

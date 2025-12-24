@@ -1,20 +1,19 @@
-import {useState, useEffect, useCallback} from "react";
-
-const SECTION_ORDER_KEY = "planner_build_panel_order";
+import {useEffect, useState} from "react";
 
 const defaultSectionOrder = [
     "edit",
     "segment",
     "heading",
     "start",
+    "globals",
     "motion",
-    "overlay",
-    "tags",
 ];
 
 export default function BuildPanel({
                                        shapeType,
                                        setShapeType,
+                                       drawMode,
+                                       setDrawMode,
                                        headingMode,
                                        setHeadingMode,
                                        endHeading,
@@ -24,8 +23,6 @@ export default function BuildPanel({
                                        // NEW:
                                        maxAccel,
                                        setMaxAccel,
-                                       playSpeed,
-                                       setPlaySpeed,
                                        tolerance,
                                        setTolerance,
                                        snapInches,
@@ -36,17 +33,14 @@ export default function BuildPanel({
                                        togglePlaceStart,
                                        useLivePose,
                                        livePoseAvailable,
-                                       showGrid,
-                                       setShowGrid,
-                                       gridStepEntry,
-                                       setGridStepEntry,
-                                       commitGridStep,
-                                       robotDimensions,
-                                       setRobotDimensions,
                                        tagName,
                                        setTagName,
                                        tagValue,
                                        setTagValue,
+                                       tagValueSource,
+                                       setTagValueSource,
+                                       tagGlobalName,
+                                       setTagGlobalName,
                                        tagPointIndex,
                                        setTagPointIndex,
                                        addTag,
@@ -62,100 +56,23 @@ export default function BuildPanel({
                                        tags,
                                        onRemoveTag,
                                        onEditTag,
+                                       globalVars = [],
+                                       onAddGlobalVar,
+                                       onUpdateGlobalVar,
+                                       onRemoveGlobalVar,
                                        onOpenSettings,
                                    }) {
-    const {length, width} = robotDimensions;
     const [openSections, setOpenSections] = useState({
         segment: true,
         heading: true,
         start: false,
         motion: false,
-        overlay: false,
-        tags: false,
+        globals: false,
     });
-    const [expandedPoints, setExpandedPoints] = useState({});
-    
-    // Drag and drop state
-    const [sectionOrder, setSectionOrder] = useState(() => {
-        try {
-            const stored = localStorage.getItem(SECTION_ORDER_KEY);
-            if (stored) {
-                const parsed = JSON.parse(stored);
-                // Validate the parsed order
-                if (Array.isArray(parsed) && parsed.length === defaultSectionOrder.length) {
-                    return parsed;
-                }
-            }
-        } catch (e) {}
-        return defaultSectionOrder;
-    });
-    const [draggedSection, setDraggedSection] = useState(null);
-    const [dragOverSection, setDragOverSection] = useState(null);
-    
-    // Save order to localStorage when it changes
-    useEffect(() => {
-        localStorage.setItem(SECTION_ORDER_KEY, JSON.stringify(sectionOrder));
-    }, [sectionOrder]);
-
-    const handleDragStart = useCallback((e, sectionId) => {
-        setDraggedSection(sectionId);
-        e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("text/plain", sectionId);
-        // Add dragging class after a short delay for visual feedback
-        setTimeout(() => {
-            e.target.classList.add("dragging");
-        }, 0);
-    }, []);
-
-    const handleDragEnd = useCallback((e) => {
-        e.target.classList.remove("dragging");
-        setDraggedSection(null);
-        setDragOverSection(null);
-    }, []);
-
-    const handleDragOver = useCallback((e, sectionId) => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-        if (sectionId !== draggedSection) {
-            setDragOverSection(sectionId);
-        }
-    }, [draggedSection]);
-
-    const handleDragLeave = useCallback(() => {
-        setDragOverSection(null);
-    }, []);
-
-    const handleDrop = useCallback((e, targetSectionId) => {
-        e.preventDefault();
-        if (!draggedSection || draggedSection === targetSectionId) return;
-        
-        setSectionOrder(prev => {
-            const newOrder = [...prev];
-            const draggedIndex = newOrder.indexOf(draggedSection);
-            const targetIndex = newOrder.indexOf(targetSectionId);
-            
-            if (draggedIndex === -1 || targetIndex === -1) return prev;
-            
-            // Remove dragged item and insert at target position
-            newOrder.splice(draggedIndex, 1);
-            newOrder.splice(targetIndex, 0, draggedSection);
-            
-            return newOrder;
-        });
-        
-        setDraggedSection(null);
-        setDragOverSection(null);
-    }, [draggedSection]);
-
+    const [newGlobalName, setNewGlobalName] = useState("");
+    const [newGlobalValue, setNewGlobalValue] = useState("");
     const toggleSection = (key) => {
         setOpenSections((prev) => ({...prev, [key]: !prev[key]}));
-    };
-
-    const togglePointExpansion = (pointIndex) => {
-        setExpandedPoints((prev) => ({
-            ...prev,
-            [pointIndex]: !prev[pointIndex]
-        }));
     };
 
     const handleToggleKey = (event, key) => {
@@ -164,36 +81,13 @@ export default function BuildPanel({
             toggleSection(key);
         }
     };
-
-    // Group tags by point index
-    const tagsByPoint = tags.reduce((acc, tag, index) => {
-        const pointIndex = tag.index - 1; // Convert to 0-based
-        if (!acc[pointIndex]) {
-            acc[pointIndex] = [];
-        }
-        acc[pointIndex].push({...tag, originalIndex: index});
-        return acc;
-    }, {});
     
     // Helper to get selected point (first if multi-select)
     const selectedPointIndex = selectedPointIndices?.length === 1 ? selectedPointIndices[0] : null;
     const hasMultiSelection = selectedPointIndices?.length > 1;
-    
-    // Drag wrapper props for a section
-    const getDragProps = (sectionId) => ({
-        draggable: true,
-        onDragStart: (e) => handleDragStart(e, sectionId),
-        onDragEnd: handleDragEnd,
-        onDragOver: (e) => handleDragOver(e, sectionId),
-        onDragLeave: handleDragLeave,
-        onDrop: (e) => handleDrop(e, sectionId),
-        className: `control-card ${draggedSection === sectionId ? 'dragging' : ''} ${dragOverSection === sectionId ? 'drag-over' : ''}`,
-    });
-
     // Section components
     const renderEditSection = () => (
-        <section key="edit" {...getDragProps("edit")}>
-            <div className="drag-handle" title="Drag to reorder">⋮⋮</div>
+        <section key="edit" className="control-card">
             <div className="card-header">
                 <div>
                     <h3>Edit Mode</h3>
@@ -204,7 +98,7 @@ export default function BuildPanel({
                 className={`btn ${editMode ? "primary" : "ghost"}`}
                 onClick={toggleEditMode}
             >
-                {editMode ? "✓ Edit Mode Active" : "Enable Edit Mode"}
+                {editMode ? "Edit Mode Active" : "Enable Edit Mode"}
             </button>
             {editMode && hasMultiSelection && (
                 <div className="field-grid">
@@ -222,7 +116,7 @@ export default function BuildPanel({
                                     title="Deselect"
                                     style={{padding: '2px 6px', minHeight: 'auto', marginLeft: '8px'}}
                                 >
-                                    ✕
+                                    x
                                 </button>
                             </div>
                         ))}
@@ -240,50 +134,26 @@ export default function BuildPanel({
                 <div className="field-grid">
                     <div className="field">
                         <label>Point #{selectedPointIndex + 1} - X (in)</label>
-                        <input
-                            type="number"
+                        <NumberField
+                            value={points[selectedPointIndex]?.x ?? 0}
                             step="0.1"
-                            value={points[selectedPointIndex]?.x ?? ""}
-                            onChange={(e) => {
-                                const val = e.target.value;
-                                if (val === "" || val === "-") {
-                                    updatePoint(selectedPointIndex, { x: 0 });
-                                } else {
-                                    updatePoint(selectedPointIndex, { x: parseFloat(val) || 0 });
-                                }
-                            }}
+                            onCommit={(value) => updatePoint(selectedPointIndex, { x: value })}
                         />
                     </div>
                     <div className="field">
                         <label>Y (in)</label>
-                        <input
-                            type="number"
+                        <NumberField
+                            value={points[selectedPointIndex]?.y ?? 0}
                             step="0.1"
-                            value={points[selectedPointIndex]?.y ?? ""}
-                            onChange={(e) => {
-                                const val = e.target.value;
-                                if (val === "" || val === "-") {
-                                    updatePoint(selectedPointIndex, { y: 0 });
-                                } else {
-                                    updatePoint(selectedPointIndex, { y: parseFloat(val) || 0 });
-                                }
-                            }}
+                            onCommit={(value) => updatePoint(selectedPointIndex, { y: value })}
                         />
                     </div>
                     <div className="field">
-                        <label>Heading (°)</label>
-                        <input
-                            type="number"
+                        <label>Heading (deg)</label>
+                        <NumberField
+                            value={points[selectedPointIndex]?.h ?? 0}
                             step="1"
-                            value={points[selectedPointIndex]?.h ?? ""}
-                            onChange={(e) => {
-                                const val = e.target.value;
-                                if (val === "" || val === "-") {
-                                    updatePoint(selectedPointIndex, { h: 0 });
-                                } else {
-                                    updatePoint(selectedPointIndex, { h: parseFloat(val) || 0 });
-                                }
-                            }}
+                            onCommit={(value) => updatePoint(selectedPointIndex, { h: value })}
                         />
                     </div>
                     <button
@@ -301,8 +171,7 @@ export default function BuildPanel({
     );
     
     const renderSegmentSection = () => (
-        <section key="segment" {...getDragProps("segment")}>
-            <div className="drag-handle" title="Drag to reorder">⋮⋮</div>
+        <section key="segment" className="control-card">
             <div
                 className="card-header collapsible"
                 role="button"
@@ -316,22 +185,33 @@ export default function BuildPanel({
                     <h3>Segment Shape</h3>
                     <p>Select the geometry for new placements.</p>
                 </div>
-                <span className="collapse-caret">{openSections.segment ? "▾" : "▸"}</span>
+                <span className="collapse-caret">{openSections.segment ? "\u25BE" : "\u25B8"}</span>
             </div>
             {openSections.segment && (
-                <div className="button-group" id="segment-card">
-                    <SegmentButton label="Line" active={shapeType === "line"} onClick={() => setShapeType("line")} />
-                    <SegmentButton label="Draw" active={shapeType === "draw"} onClick={() => setShapeType("draw")} />
-                    <SegmentButton label="Bézier Curve" active={shapeType === "bezier"} onClick={() => setShapeType("bezier")} />
-                    <SegmentButton label="Circular Arc" active={shapeType === "arc"} onClick={() => setShapeType("arc")} />
-                </div>
+                <>
+                    <div className="button-group" id="segment-card">
+                        <SegmentButton label="Line" active={shapeType === "line"} onClick={() => setShapeType("line")} />
+                        <SegmentButton label="Draw" active={shapeType === "draw"} onClick={() => setShapeType("draw")} />
+                        <SegmentButton label="Bezier Curve" active={shapeType === "bezier"} onClick={() => setShapeType("bezier")} />
+                        <SegmentButton label="Circular Arc" active={shapeType === "arc"} onClick={() => setShapeType("arc")} />
+                    </div>
+                    {shapeType === "draw" && (
+                        <div className="draw-type">
+                            <div className="draw-type-label">Draw Type</div>
+                            <div className="draw-type-group">
+                            <SegmentButton label="Bezier" active={drawMode === "bezier"} onClick={() => setDrawMode("bezier")} />
+                            <SegmentButton label="Arc" active={drawMode === "arc"} onClick={() => setDrawMode("arc")} />
+                            <SegmentButton label="Free" active={drawMode === "free"} onClick={() => setDrawMode("free")} />
+                        </div>
+                        </div>
+                    )}
+                </>
             )}
         </section>
     );
     
     const renderHeadingSection = () => (
-        <section key="heading" {...getDragProps("heading")}>
-            <div className="drag-handle" title="Drag to reorder">⋮⋮</div>
+        <section key="heading" className="control-card">
             <div
                 className="card-header collapsible"
                 role="button"
@@ -345,7 +225,7 @@ export default function BuildPanel({
                     <h3>Heading Strategy</h3>
                     <p>Determine how headings are generated for each point.</p>
                 </div>
-                <span className="collapse-caret">{openSections.heading ? "▾" : "▸"}</span>
+                <span className="collapse-caret">{openSections.heading ? "\u25BE" : "\u25B8"}</span>
             </div>
             {openSections.heading && (
                 <div className="button-group compact" id="heading-card">
@@ -355,7 +235,7 @@ export default function BuildPanel({
                     <SegmentButton label="Orthogonal R" active={headingMode === "orth-right"} onClick={() => setHeadingMode("orth-right")} />
                     {headingMode === "straight" && (
                         <div className="field">
-                            <label>Desired end heading (°)</label>
+                            <label>Desired end Heading (deg)</label>
                             <input
                                 type="text"
                                 value={String(endHeading)}
@@ -377,8 +257,7 @@ export default function BuildPanel({
     );
     
     const renderStartSection = () => (
-        <section key="start" {...getDragProps("start")}>
-            <div className="drag-handle" title="Drag to reorder">⋮⋮</div>
+        <section key="start" className="control-card">
             <div
                 className="card-header collapsible"
                 role="button"
@@ -392,7 +271,7 @@ export default function BuildPanel({
                     <h3>Start Pose</h3>
                     <p>Define where the robot begins on the field.</p>
                 </div>
-                <span className="collapse-caret">{openSections.start ? "▾" : "▸"}</span>
+                <span className="collapse-caret">{openSections.start ? "\u25BE" : "\u25B8"}</span>
             </div>
             {openSections.start && (
                 <div className="field-grid three" id="start-card">
@@ -402,7 +281,7 @@ export default function BuildPanel({
                     <Field label="Y (in)">
                         <input type="text" value={String(startPose.y)} onChange={(event) => handlePoseChange(event.target.value, "y", setStartPose)} />
                     </Field>
-                    <Field label="Heading (°)">
+                    <Field label="Heading (deg)">
                         <input type="text" value={String(startPose.h)} onChange={(event) => handlePoseChange(event.target.value, "h", setStartPose)} />
                     </Field>
                 </div>
@@ -419,8 +298,7 @@ export default function BuildPanel({
     );
     
     const renderMotionSection = () => (
-        <section key="motion" {...getDragProps("motion")}>
-            <div className="drag-handle" title="Drag to reorder">⋮⋮</div>
+        <section key="motion" className="control-card">
             <div
                 className="card-header collapsible"
                 role="button"
@@ -434,18 +312,15 @@ export default function BuildPanel({
                     <h3>Motion & Placement</h3>
                     <p>Match drivetrain performance and snapping preferences.</p>
                 </div>
-                <span className="collapse-caret">{openSections.motion ? "▾" : "▸"}</span>
+                <span className="collapse-caret">{openSections.motion ? "\u25BE" : "\u25B8"}</span>
             </div>
             {openSections.motion && (
                 <div className="field-grid" id="motion-card">
                     <Field label="Velocity (in/s)">
                         <input type="number" min={1} max={200} step={1} value={velocity} onChange={(event) => setVelocity(event.target.value)} />
                     </Field>
-                    <Field label="Max accel (in/s²)">
+                    <Field label="Max accel (in/s^2)">
                         <input type="number" min={1} max={400} step={1} value={maxAccel} onChange={(event) => setMaxAccel(event.target.value)} />
-                    </Field>
-                    <Field label="Preview speed (in/s)">
-                        <input type="number" min={1} max={200} step={1} value={playSpeed} onChange={(event) => setPlaySpeed(event.target.value)} />
                     </Field>
                     <Field label="Tolerance (in)">
                         <input type="number" min={0} step={0.1} value={tolerance} onChange={(event) => setTolerance(event.target.value)} />
@@ -457,227 +332,98 @@ export default function BuildPanel({
             )}
         </section>
     );
-    
-    const renderOverlaySection = () => (
-        <section key="overlay" {...getDragProps("overlay")}>
-            <div className="drag-handle" title="Drag to reorder">⋮⋮</div>
+
+    const renderGlobalsSection = () => (
+        <section key="globals" className="control-card"> 
             <div
                 className="card-header collapsible"
                 role="button"
                 tabIndex={0}
-                aria-expanded={openSections.overlay}
-                aria-controls="overlay-card"
-                onClick={() => toggleSection("overlay")}
-                onKeyDown={(event) => handleToggleKey(event, "overlay")}
+                aria-expanded={openSections.globals}
+                aria-controls="globals-card"
+                onClick={() => toggleSection("globals")}
+                onKeyDown={(event) => handleToggleKey(event, "globals")}
             >
                 <div>
-                    <h3>Field Overlay</h3>
-                    <p>Toggle gridlines and update the robot footprint.</p>
+                    <h3>Global Variables</h3>
+                    <p>Share values across tags.</p>
                 </div>
-                <span className="collapse-caret">{openSections.overlay ? "▾" : "▸"}</span>
+                <span className="collapse-caret">{openSections.globals ? "\u25BE" : "\u25B8"}</span>
             </div>
-            {openSections.overlay && (
-                <>
-                    <div className="field-grid" id="overlay-card">
-                        <Field label="Grid overlay">
-                            <select value={showGrid ? "on" : "off"} onChange={(event) => setShowGrid(event.target.value === "on")}>
-                                <option value="off">Hidden</option>
-                                <option value="on">Visible</option>
-                            </select>
-                        </Field>
-                        <Field label="Grid step (in)">
+            {openSections.globals && (
+                <div id="globals-card">
+                    <div className="field-grid">
+                        <Field label="Name">
                             <input
-                                type="number"
-                                min={0.25}
-                                step={0.25}
-                                value={gridStepEntry}
-                                onChange={(event) => setGridStepEntry(event.target.value)}
-                                onBlur={commitGridStep}
-                                onKeyDown={(event) => {
-                                    if (event.key === "Enter") {
-                                        commitGridStep();
-                                        event.currentTarget.blur();
-                                    }
-                                }}
-                                disabled={!showGrid}
-                                style={showGrid ? undefined : {opacity: 0.55}}
+                                type="text"
+                                placeholder="e.g. speed"
+                                value={newGlobalName}
+                                onChange={(event) => setNewGlobalName(event.target.value)}
                             />
                         </Field>
-                        <Field label="Robot length (in)">
-                            <input type="number" min={1} max={36} step={0.5} value={length} onChange={(event) => setRobotDimensions((prev) => ({...prev, length: event.target.value}))} />
-                        </Field>
-                        <Field label="Robot width (in)">
-                            <input type="number" min={1} max={36} step={0.5} value={width} onChange={(event) => setRobotDimensions((prev) => ({...prev, width: event.target.value}))} />
+                        <Field label="Value">
+                            <input
+                                type="number"
+                                step={0.1}
+                                placeholder="0"
+                                value={newGlobalValue}
+                                onChange={(event) => setNewGlobalValue(event.target.value)}
+                            />
                         </Field>
                     </div>
-                    <p className="helper-text">Length aligns with +X, width with +Y.</p>
-                </>
-            )}
-        </section>
-    );
-    
-    const renderTagsSection = () => (
-        <section key="tags" {...getDragProps("tags")}>
-            <div className="drag-handle" title="Drag to reorder">⋮⋮</div>
-            <div
-                className="card-header collapsible"
-                role="button"
-                tabIndex={0}
-                aria-expanded={openSections.tags}
-                aria-controls="tags-card"
-                onClick={() => toggleSection("tags")}
-                onKeyDown={(event) => handleToggleKey(event, "tags")}
-            >
-                <div>
-                    <h3>Tags</h3>
-                    <p>Attach metadata to match automation routines.</p>
-                </div>
-                <span className="collapse-caret">{openSections.tags ? "▾" : "▸"}</span>
-            </div>
-            {openSections.tags && (
-                <div id="tags-card">
-                    {points.length === 0 ? (
-                        <p className="helper-text">Add points to the path to create tags</p>
-                    ) : (
-                        <>
-                            {points.map((point, pointIndex) => {
-                                const pointTags = tagsByPoint[pointIndex] || [];
-                                const isExpanded = expandedPoints[pointIndex];
+                    <button
+                        className="btn primary"
+                        onClick={() => {
+                            const name = newGlobalName.trim();
+                            if (!name) return;
+                            onAddGlobalVar?.(name, newGlobalValue);
+                            setNewGlobalName("");
+                            setNewGlobalValue("");
+                        }}
+                        disabled={!newGlobalName.trim()}
+                        style={{width: '100%'}}
+                    >
+                        Add Global Variable
+                    </button>
 
-                                return (
-                                    <div key={pointIndex} className="point-section">
-                                        <div
-                                            className="point-header"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-expanded={isExpanded}
-                                            onClick={() => togglePointExpansion(pointIndex)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === "Enter" || event.key === " ") {
-                                                    event.preventDefault();
-                                                    togglePointExpansion(pointIndex);
-                                                }
-                                            }}
-                                        >
-                                            <div>
-                                                <h4>Point {pointIndex + 1}</h4>
-                                                <p>({point.x?.toFixed(1) || "0"}, {point.y?.toFixed(1) || "0"}){point.h !== undefined ? ` • ${point.h}°` : ""}</p>
-                                                {pointTags.length > 0 && (
-                                                    <p className="tag-count">{pointTags.length} tag{pointTags.length !== 1 ? 's' : ''}</p>
-                                                )}
-                                            </div>
-                                            <span className="collapse-caret">{isExpanded ? "▾" : "▸"}</span>
+                    {globalVars.length > 0 ? (
+                        <div className="point-tag-list" style={{marginTop: '0.75rem'}}>
+                            {globalVars.map((entry) => (
+                                <div key={entry.name} className="point-tag-item">
+                                    <div className="point-tag-header">
+                                        <div style={{flex: 1, minWidth: 0}}>
+                                            <span className="point-tag-name">{entry.name}</span>
                                         </div>
-
-                                        {isExpanded && (
-                                            <div className="point-tags-content">
-                                                {pointTags.length > 0 ? (
-                                                    <div className="point-tag-list">
-                                                        {pointTags.map((tag) => (
-                                                            <div key={tag.originalIndex} className="point-tag-item">
-                                                                <div className="point-tag-header">
-                                                                    <div style={{flex: 1, minWidth: 0}}>
-                                                                        <span className="point-tag-name">{tag.name}</span>
-                                                                        <div className="point-tag-value">{tag.value}</div>
-                                                                    </div>
-                                                                </div>
-                                                                <div className="point-tag-actions">
-                                                                    <button
-                                                                        className="btn ghost"
-                                                                        onClick={() => {
-                                                                            const newName = prompt("Tag name:", tag.name);
-                                                                            const newValue = prompt("Tag value:", tag.value);
-                                                                            if (newName && onEditTag) {
-                                                                                onEditTag(tag.originalIndex, newName, Number(newValue) || 0, tag.index);
-                                                                            }
-                                                                        }}
-                                                                    >
-                                                                        Edit
-                                                                    </button>
-                                                                    {onRemoveTag && (
-                                                                        <button
-                                                                            className="btn danger"
-                                                                            onClick={() => onRemoveTag(tag.originalIndex)}
-                                                                        >
-                                                                            Delete
-                                                                        </button>
-                                                                    )}
-                                                                </div>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                ) : (
-                                                    <p className="helper-text">No tags for this point</p>
-                                                )}
-
-                                                <div className="field-grid">
-                                                    <Field label="Tag Type">
-                                                        <select 
-                                                            value={tagName} 
-                                                            onChange={(event) => {
-                                                                const selectedName = event.target.value;
-                                                                setTagName(selectedName);
-                                                                const defaults = {
-                                                                    velocity: 50,
-                                                                    pause: 1,
-                                                                    intake: 0,
-                                                                    autoAimRed: 0,
-                                                                    autoAimBlue: 0,
-                                                                    shooterVelocity: 0,
-                                                                    hoodAngle: 0,
-                                                                    launchArtifacts: 1,
-                                                                };
-                                                                if (defaults[selectedName] !== undefined) {
-                                                                    setTagValue(defaults[selectedName]);
-                                                                }
-                                                            }}
-                                                        >
-                                                            <option value="">-- Select Type --</option>
-                                                            <option value="velocity">velocity - Robot speed (in/s)</option>
-                                                            <option value="pause">pause - Pause duration (sec)</option>
-                                                            <option value="intake">intake - Intake control</option>
-                                                            <option value="autoAimRed">autoAimRed - Red alliance aim</option>
-                                                            <option value="autoAimBlue">autoAimBlue - Blue alliance aim</option>
-                                                            <option value="shooterVelocity">shooterVelocity - Shooter speed</option>
-                                                            <option value="hoodAngle">hoodAngle - Hood angle (deg)</option>
-                                                            <option value="launchArtifacts">launchArtifacts - Launch duration (sec)</option>
-                                                        </select>
-                                                    </Field>
-                                                    <Field label="Value">
-                                                        <input 
-                                                            type="number" 
-                                                            step={0.1} 
-                                                            placeholder="0" 
-                                                            value={tagValue} 
-                                                            onChange={(event) => setTagValue(event.target.value)} 
-                                                        />
-                                                    </Field>
-                                                </div>
-                                                <button 
-                                                    className="btn primary" 
-                                                    onClick={() => {
-                                                        if (tagName.trim()) {
-                                                            setTagPointIndex(pointIndex + 1);
-                                                            addTag();
-                                                        }
-                                                    }} 
-                                                    disabled={!tagName.trim()}
-                                                    style={{width: '100%'}}
-                                                >
-                                                    Add Tag to Point {pointIndex + 1}
-                                                </button>
-                                            </div>
-                                        )}
                                     </div>
-                                );
-                            })}
-                        </>
+                                    <div className="field-grid">
+                                        <Field label="Value">
+                                            <input
+                                                type="number"
+                                                step={0.1}
+                                                value={entry.value}
+                                                onChange={(event) => onUpdateGlobalVar?.(entry.name, event.target.value)}
+                                            />
+                                        </Field>
+                                    </div>
+                                    <div className="point-tag-actions">
+                                        <button
+                                            className="btn danger"
+                                            onClick={() => onRemoveGlobalVar?.(entry.name)}
+                                        >
+                                            Delete
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <p className="helper-text">No global variables yet.</p>
                     )}
                 </div>
             )}
         </section>
     );
-    
+
     // Map section IDs to render functions
     const sectionRenderers = {
         edit: renderEditSection,
@@ -685,8 +431,8 @@ export default function BuildPanel({
         heading: renderHeadingSection,
         start: renderStartSection,
         motion: renderMotionSection,
-        overlay: renderOverlaySection,
-        tags: renderTagsSection,
+        globals: renderGlobalsSection,
+        
     };
 
     return (
@@ -694,16 +440,60 @@ export default function BuildPanel({
             <div className="panel-header">
                 <h2>Planner Controls</h2>
                 <button className="btn ghost small" onClick={onOpenSettings} title="Open Settings">
-                    ⚙️ Setup
+                    Setup
                 </button>
             </div>
             <div className="panel-body scroll-area">
-                {sectionOrder.map(sectionId => sectionRenderers[sectionId]?.())}
+                {defaultSectionOrder.map(sectionId => sectionRenderers[sectionId]?.())}
             </div>
         </aside>
     );
 }
 
+const formatNumber = (value, precision = 3) => {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return "";
+    const fixed = num.toFixed(precision);
+    return fixed.replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
+};
+
+const NumberField = ({value, step = "0.1", onCommit}) => {
+    const [draft, setDraft] = useState(formatNumber(value));
+
+    useEffect(() => {
+        setDraft(formatNumber(value));
+    }, [value]);
+
+    const commitValue = () => {
+        if (draft === "" || draft === "-") {
+            setDraft(formatNumber(value));
+            return;
+        }
+        const next = Number(draft);
+        if (!Number.isFinite(next)) {
+            setDraft(formatNumber(value));
+            return;
+        }
+        onCommit?.(next);
+    };
+
+    return (
+        <input
+            type="text"
+            inputMode="decimal"
+            step={step}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commitValue}
+            onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                    commitValue();
+                    e.currentTarget.blur();
+                }
+            }}
+        />
+    );
+};
 const SegmentButton = ({label, active, onClick}) => (
     <button className={`btn pill ${active ? "pill-active" : ""}`} onClick={onClick}>
         {label}
@@ -734,3 +524,28 @@ function normalizeHeading(angle) {
     if (a <= -180) a += 360;
     return a;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

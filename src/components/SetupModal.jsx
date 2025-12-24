@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import {
-    HUB_IP,
     FIELD_SIZE_IN,
+    GRID_DEFAULT_STEP,
+    DEFAULT_ROBOT_DIMENSIONS,
     PATH_COLOR,
     START_COLOR,
     WAYPOINT_COLOR,
@@ -25,8 +26,10 @@ export default function SetupModal({ isOpen, onClose, onSave, initialSettings })
     const [activeTab, setActiveTab] = useState("general");
     
     // General Settings
-    const [hubIp, setHubIp] = useState(HUB_IP);
     const [fieldSize, setFieldSize] = useState(FIELD_SIZE_IN);
+    const [showGrid, setShowGrid] = useState(false);
+    const [gridStepEntry, setGridStepEntry] = useState(String(GRID_DEFAULT_STEP));
+    const [robotDimensions, setRobotDimensions] = useState({...DEFAULT_ROBOT_DIMENSIONS});
     
     // Theme Settings
     const [palette, setPalette] = useState(DEFAULT_PALETTE);
@@ -40,8 +43,12 @@ export default function SetupModal({ isOpen, onClose, onSave, initialSettings })
 
     useEffect(() => {
         if (isOpen && initialSettings) {
-            setHubIp(initialSettings.hubIp || HUB_IP);
             setFieldSize(initialSettings.fieldSize || FIELD_SIZE_IN);
+            setShowGrid(Boolean(initialSettings.showGrid));
+            const step = Number(initialSettings.gridStep);
+            const nextStep = Number.isFinite(step) && step > 0 ? step : GRID_DEFAULT_STEP;
+            setGridStepEntry(initialSettings.gridStepEntry ?? String(nextStep));
+            setRobotDimensions(initialSettings.robotDimensions || {...DEFAULT_ROBOT_DIMENSIONS});
             setPalette(initialSettings.palette || DEFAULT_PALETTE);
             
             setThemeName(initialSettings.themeName || "default");
@@ -52,10 +59,26 @@ export default function SetupModal({ isOpen, onClose, onSave, initialSettings })
         }
     }, [isOpen, initialSettings]);
 
+    const commitGridStep = () => {
+        const parsed = parseFloat(gridStepEntry);
+        if (!gridStepEntry || !Number.isFinite(parsed) || parsed <= 0) {
+            setGridStepEntry(String(GRID_DEFAULT_STEP));
+        } else {
+            setGridStepEntry(String(parsed));
+        }
+    };
+
     const handleSave = () => {
+        const parsed = parseFloat(gridStepEntry);
+        const resolvedStep = (!gridStepEntry || !Number.isFinite(parsed) || parsed <= 0)
+            ? GRID_DEFAULT_STEP
+            : parsed;
         onSave({ 
-            hubIp, 
             fieldSize, 
+            showGrid,
+            gridStep: resolvedStep,
+            gridStepEntry: String(resolvedStep),
+            robotDimensions,
             palette,
             themeName,
             blurStrength,
@@ -67,8 +90,10 @@ export default function SetupModal({ isOpen, onClose, onSave, initialSettings })
     };
 
     const handleReset = () => {
-        setHubIp(HUB_IP);
         setFieldSize(FIELD_SIZE_IN);
+        setShowGrid(false);
+        setGridStepEntry(String(GRID_DEFAULT_STEP));
+        setRobotDimensions({...DEFAULT_ROBOT_DIMENSIONS});
         setPalette(DEFAULT_PALETTE);
         setThemeName("default");
         setBlurStrength(16);
@@ -132,20 +157,6 @@ export default function SetupModal({ isOpen, onClose, onSave, initialSettings })
                             </p>
 
                             <div className="modal-section">
-                                <h3>Network Settings</h3>
-                                <div className="field">
-                                    <label>Hub IP Address</label>
-                                    <input
-                                        type="text"
-                                        value={hubIp}
-                                        onChange={(e) => setHubIp(e.target.value)}
-                                        placeholder="e.g. 192.168.43.1"
-                                    />
-                                    <span className="field-hint">The IP address of the robot's control hub.</span>
-                                </div>
-                            </div>
-
-                            <div className="modal-section">
                                 <h3>Field Geometry</h3>
                                 <div className="field">
                                     <label>Field Size (inches)</label>
@@ -156,6 +167,63 @@ export default function SetupModal({ isOpen, onClose, onSave, initialSettings })
                                     />
                                     <span className="field-hint">Total width/height of the square field.</span>
                                 </div>
+                            </div>
+
+                            <div className="modal-section">
+                                <h3>Field Overlay</h3>
+                                <div className="field-grid">
+                                    <div className="field">
+                                        <label>Grid overlay</label>
+                                        <select value={showGrid ? "on" : "off"} onChange={(event) => setShowGrid(event.target.value === "on")}>
+                                            <option value="off">Hidden</option>
+                                            <option value="on">Visible</option>
+                                        </select>
+                                    </div>
+                                    <div className="field">
+                                        <label>Grid step (in)</label>
+                                        <input
+                                            type="number"
+                                            min={0.25}
+                                            step={0.25}
+                                            value={gridStepEntry}
+                                            onChange={(event) => setGridStepEntry(event.target.value)}
+                                            onBlur={commitGridStep}
+                                            onKeyDown={(event) => {
+                                                if (event.key === "Enter") {
+                                                    commitGridStep();
+                                                    event.currentTarget.blur();
+                                                }
+                                            }}
+                                            disabled={!showGrid}
+                                            style={showGrid ? undefined : {opacity: 0.55}}
+                                        />
+                                    </div>
+                                </div>
+                                <div className="field-grid" style={{marginTop: "12px"}}>
+                                    <div className="field">
+                                        <label>Robot length (in)</label>
+                                        <input
+                                            type="number"
+                                            min={1}
+                                            max={36}
+                                            step={0.5}
+                                            value={robotDimensions.length}
+                                            onChange={(event) => setRobotDimensions((prev) => ({...prev, length: event.target.value}))}
+                                        />
+                                    </div>
+                                    <div className="field">
+                                        <label>Robot width (in)</label>
+                                        <input
+                                            type="number"
+                                            min={1}
+                                            max={36}
+                                            step={0.5}
+                                            value={robotDimensions.width}
+                                            onChange={(event) => setRobotDimensions((prev) => ({...prev, width: event.target.value}))}
+                                        />
+                                    </div>
+                                </div>
+                                <p className="helper-text">Length aligns with +X, width with +Y.</p>
                             </div>
                         </>
                     )}

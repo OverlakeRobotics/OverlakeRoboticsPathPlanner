@@ -55,10 +55,13 @@ export const usePlayback = ({totalLength = 0, speed = 0}) => {
         setState((prev) => {
             if (prev === "playing") return "paused";
             if ((totalLength || 0) <= 0) return prev;
+            if (distance >= (totalLength || 0)) {
+                setDistance(0);
+            }
             lastFrameRef.current = 0;
             return "playing";
         });
-    }, [totalLength]);
+    }, [totalLength, distance]);
 
     return {
         playState: state,

@@ -33,13 +33,19 @@ export const rotateLocalToWorld = (lx, ly, headingDeg) => {
     };
 };
 
-export const snapToField = (x, y, step) => {
-    if (!step || step <= 0) return {x, y};
-    const origin = -FIELD_EDGE_IN;
+export const snapToField = (x, y, step, fieldSize) => {
+    const half = Number.isFinite(fieldSize) && fieldSize > 0 ? fieldSize / 2 : FIELD_EDGE_IN;
+    if (!step || step <= 0) {
+        return {
+            x: Math.max(-half, Math.min(half, x)),
+            y: Math.max(-half, Math.min(half, y)),
+        };
+    }
+    const origin = -half;
     const sx = origin + Math.round((x - origin) / step) * step;
     const sy = origin + Math.round((y - origin) / step) * step;
     return {
-        x: Math.max(-FIELD_EDGE_IN, Math.min(FIELD_EDGE_IN, sx)),
-        y: Math.max(-FIELD_EDGE_IN, Math.min(FIELD_EDGE_IN, sy)),
+        x: Math.max(-half, Math.min(half, sx)),
+        y: Math.max(-half, Math.min(half, sy)),
     };
 };

@@ -1,17 +1,15 @@
-import {useCallback, useEffect, useMemo, useRef, useState} from "react";
+﻿import {useCallback, useEffect, useMemo, useRef, useState} from "react";
 import decodeField from "./assets/decode_field.png";
 import "./App.css";
 
 import CanvasStage from "./components/CanvasStage";
 import BuildPanel from "./components/panels/BuildPanel";
 import RunPanel from "./components/panels/RunPanel";
-import TagModal from "./components/TagModal";
 import ExportModal from "./components/ExportModal";
 import SetupModal from "./components/SetupModal";
 import {
     DEFAULT_CANVAS_SIZE,
     DEFAULT_MAX_ACCEL_IN_PER_S2,
-    DEFAULT_PLAYBACK_SPEED_IN_PER_S,
     DEFAULT_ROBOT_DIMENSIONS,
     DEFAULT_SNAP_IN,
     DEFAULT_TOLERANCE_IN,
@@ -41,9 +39,10 @@ import {useTheme} from "./hooks/useTheme";
 import {useRobotConnection} from "./hooks/useRobotConnection";
 import {clamp, num, normDeg, toFixed} from "./utils/math";
 import {polylineLength} from "./utils/path";
+import {buildArcSegment, buildBezierSegment, buildLineSegment} from "./utils/segments";
 
 function wrapAngleRad(a) {
-    // wrap to (-π, π]
+    // wrap to (-Ï€, Ï€]
     let x = a % (2 * Math.PI);
     if (x <= -Math.PI) x += 2 * Math.PI;
     if (x > Math.PI) x -= 2 * Math.PI;
@@ -172,7 +171,6 @@ export default function App() {
 
     // Settings State
     const [showSetupModal, setShowSetupModal] = useState(false);
-    const [hubIp, setHubIp] = useState(HUB_IP);
     const [fieldSize, setFieldSize] = useState(FIELD_SIZE_IN);
     const [palette, setPalette] = useState({
         path: PATH_COLOR,
@@ -198,8 +196,11 @@ export default function App() {
         if (stored) {
             try {
                 const parsed = JSON.parse(stored);
-                if (parsed.hubIp) setHubIp(parsed.hubIp);
                 if (parsed.fieldSize) setFieldSize(parsed.fieldSize);
+                if (parsed.showGrid !== undefined) setShowGrid(Boolean(parsed.showGrid));
+                if (Number.isFinite(Number(parsed.gridStep))) setGridStep(Number(parsed.gridStep));
+                if (parsed.gridStepEntry !== undefined) setGridStepEntry(String(parsed.gridStepEntry));
+                if (parsed.robotDimensions) setRobotDimensions({...DEFAULT_ROBOT_DIMENSIONS, ...parsed.robotDimensions});
                 if (parsed.palette) setPalette(parsed.palette);
                 if (parsed.themeName) setThemeName(parsed.themeName);
                 if (parsed.blurStrength !== undefined) setBlurStrength(parsed.blurStrength);
@@ -209,14 +210,15 @@ export default function App() {
             } catch (e) {
                 console.error("Failed to parse settings", e);
             }
-        } else {
-            setShowSetupModal(true);
         }
     }, []);
 
     const handleSaveSettings = (settings) => {
-        setHubIp(settings.hubIp);
         setFieldSize(settings.fieldSize);
+        setShowGrid(Boolean(settings.showGrid));
+        setGridStep(Number(settings.gridStep) || GRID_DEFAULT_STEP);
+        setGridStepEntry(settings.gridStepEntry ?? String(settings.gridStep ?? GRID_DEFAULT_STEP));
+        setRobotDimensions({...DEFAULT_ROBOT_DIMENSIONS, ...settings.robotDimensions});
         setPalette(settings.palette);
         setThemeName(settings.themeName);
         setBlurStrength(settings.blurStrength);
@@ -229,48 +231,39 @@ export default function App() {
     const [startPose, setStartPose] = useState({x: 0, y: 0, h: 0});
     const [placeStart, setPlaceStart] = useState(false);
 
-    const [points, setPointsInternal] = useState([]);
+    const [segments, setSegmentsInternal] = useState([]);
     const [undoStack, setUndoStack] = useState([]);
-    const [shouldShowTagModal, setShouldShowTagModal] = useState(true);
 
     // Point editing state
     const [selectedPointIndices, setSelectedPointIndices] = useState([]); // Now an array for multi-selection
     const [editMode, setEditMode] = useState(false); // When true, enable point editing
 
-    const setPoints = useCallback((updater) => {
-        setPointsInternal((prev) => {
-            const next = typeof updater === 'function' ? updater(prev) : updater;
-            // Check if points were added (one at a time, not bulk operations)
-            if (shouldShowTagModal && next.length === prev.length + 1) {
-                // Show modal for the last added point
-                setPendingTagPointIndex(next.length);
-                setShowTagModal(true);
-            }
-            return next;
-        });
-    }, [shouldShowTagModal]);
+    const setSegments = useCallback((updater) => {
+        setSegmentsInternal((prev) => (typeof updater === 'function' ? updater(prev) : updater));
+    }, []);
 
-    const setPointsWithoutModal = useCallback((updater) => {
-        setShouldShowTagModal(false);
-        setPointsInternal(updater);
-        // Re-enable modal after a short delay
-        setTimeout(() => setShouldShowTagModal(true), 100);
+    const setSegmentsWithoutModal = useCallback((updater) => {
+        setSegmentsInternal((prev) => (typeof updater === 'function' ? updater(prev) : updater));
     }, []);
 
     const [tags, setTags] = useState([]);
     const [tagName, setTagName] = useState("");
     const [tagValue, setTagValue] = useState("");
     const [tagPointIndex, setTagPointIndex] = useState(""); // Index for manual tag placement
-    const [showTagModal, setShowTagModal] = useState(false);
-    const [pendingTagPointIndex, setPendingTagPointIndex] = useState(null);
     const [showExportModal, setShowExportModal] = useState(false);
 
+    const [alliance, setAlliance] = useState("red");
+    const [globalVars, setGlobalVars] = useState([]);
+    const [tagValueSource, setTagValueSource] = useState("manual");
+    const [tagGlobalName, setTagGlobalName] = useState("");
+    const [expandedPointIndex, setExpandedPointIndex] = useState(null);
+
     const [shapeType, setShapeType] = useState("line");
+    const [drawMode, setDrawMode] = useState("bezier");
     const [headingMode, setHeadingMode] = useState("straight");
     const [endHeading, setEndHeading] = useState(String(0));
 
     const [velocity, setVelocity] = useState(String(DEFAULT_VELOCITY_IN_PER_S));
-    const [playSpeed, setPlaySpeed] = useState(String(DEFAULT_PLAYBACK_SPEED_IN_PER_S));
     const [maxAccel, setMaxAccel] = useState(String(DEFAULT_MAX_ACCEL_IN_PER_S2));
     const [tolerance, setTolerance] = useState(String(DEFAULT_TOLERANCE_IN));
     const [snapInches, setSnapInches] = useState(String(DEFAULT_SNAP_IN));
@@ -293,7 +286,7 @@ export default function App() {
     const runTimerRef = useRef(null);
     const undoRef = useRef(() => {});
 
-    const { isConnected, robotStatus, robotConfig, sendInit, sendStart, sendStop, livePose } = useRobotConnection(hubIp);
+    const { isConnected, robotStatus, robotConfig, sendInit, sendStart, sendStop, livePose } = useRobotConnection(HUB_IP);
     const robotState = robotStatus?.activeOpModeStatus || null;
 
     useEffect(() => {
@@ -316,16 +309,34 @@ export default function App() {
         return () => window.removeEventListener("resize", update);
     }, []);
 
+    const pathPoints = useMemo(
+        () => segments.flatMap((segment) => segment.samples || []),
+        [segments]
+    );
+
+    const segmentEndIndices = useMemo(() => {
+        let cursor = -1;
+        return segments.map((segment) => {
+            cursor += segment.samples?.length || 0;
+            return cursor;
+        });
+    }, [segments]);
+
+    const displayPoints = useMemo(
+        () => segmentEndIndices.map((index) => pathPoints[index]).filter(Boolean),
+        [segmentEndIndices, pathPoints]
+    );
+
     const waypoints = useMemo(
-        () => [{x: num(startPose.x), y: num(startPose.y)}, ...points.map((p) => ({x: p.x, y: p.y}))],
-        [startPose, points]
+        () => [{x: num(startPose.x), y: num(startPose.y)}, ...pathPoints.map((p) => ({x: p.x, y: p.y}))],
+        [startPose, pathPoints]
     );
     const totalLength = useMemo(() => polylineLength(waypoints), [waypoints]);
     const endHeadingValue = useMemo(() => normDeg(num(endHeading)), [endHeading]);
 
     const previewProfile = useMemo(
-        () => buildSpeedProfile(waypoints, playSpeed, maxAccel),
-        [waypoints, playSpeed, maxAccel]
+        () => buildSpeedProfile(waypoints, velocity, maxAccel),
+        [waypoints, velocity, maxAccel]
     );
 
     const runProfile = useMemo(
@@ -345,7 +356,7 @@ export default function App() {
 
     useEffect(() => {
         stopPlayback();
-    }, [points, startPose.x, startPose.y, startPose.h, stopPlayback]);
+    }, [segments, startPose.x, startPose.y, startPose.h, stopPlayback]);
 
     useEffect(() => {
         if (!livePose) return;
@@ -414,13 +425,12 @@ export default function App() {
         setDrawTemp(null);
         setPlaceStart((prev) => {
             const next = !prev;
-            if (next) clearAll();
             return next;
         });
     };
 
     const clearAll = () => {
-        setPoints([]);
+        setSegments([]);
         setUndoStack([]);
         setTags([]);
         setBezierTemp(null);
@@ -454,9 +464,9 @@ export default function App() {
         if (undoStack.length === 0) return;
         const last = undoStack[undoStack.length - 1];
         const removeCount = Math.max(0, last?.count ?? 0);
-        if (removeCount > 0) setPoints((prev) => prev.slice(0, Math.max(0, prev.length - removeCount)));
+        if (removeCount > 0) setSegments((prev) => prev.slice(0, Math.max(0, prev.length - removeCount)));
         setUndoStack((prev) => prev.slice(0, -1));
-    }, [bezierTemp, arcTemp, undoStack]);
+    }, [bezierTemp, arcTemp, undoStack, setSegments]);
 
     useEffect(() => { undoRef.current = undoLast; }, [undoLast]);
 
@@ -474,31 +484,36 @@ export default function App() {
     }, []);
 
     const addTag = () => {
-        if (points.length === 0) return;
+        if (displayPoints.length === 0) return;
         const name = (tagName ?? "").trim();
         if (!name) return;
         const value = Number(tagValue) || 0;
-        const targetIndex = Math.max(1, Math.min(points.length, Number(tagPointIndex) || points.length));
-        setTags((prev) => [...prev, {index: targetIndex, name, value}]);
+        const globalName = tagValueSource === "global" ? (tagGlobalName || "").trim() : "";
+        const targetIndex = Math.max(1, Math.min(displayPoints.length, Number(tagPointIndex) || displayPoints.length));
+        setTags((prev) => [...prev, {index: targetIndex, name, value, globalName: globalName || undefined}]);
         setTagName("");
         setTagValue("");
         setTagPointIndex("");
+        setTagValueSource("manual");
+        setTagGlobalName("");
     };
 
-    const addTagFromModal = (name, value, pointIndex) => {
-        setTags((prev) => [...prev, {index: pointIndex, name, value}]);
+    const addTagFromModal = (name, value, pointIndex, globalName) => {
+        setTags((prev) => [...prev, {index: pointIndex, name, value, globalName: globalName || undefined}]);
     };
 
-    const addTagFromRunPanel = (name, value, pointIndex) => {
-        setTags((prev) => [...prev, {index: pointIndex, name, value}]);
+    const addTagFromRunPanel = (name, value, pointIndex, globalName) => {
+        setTags((prev) => [...prev, {index: pointIndex, name, value, globalName: globalName || undefined}]);
     };
 
     const removeTag = (index) => setTags((prev) => prev.filter((_, i) => i !== index));
 
-    const editTag = (index, name, value, pointIndex) => {
+    const editTag = (index, name, value, pointIndex, globalName) => {
         setTags((prev) => {
             const updated = [...prev];
-            updated[index] = { name, value, index: pointIndex };
+            const existing = updated[index] || {};
+            const resolvedGlobal = globalName === undefined ? existing.globalName : globalName || undefined;
+            updated[index] = { name, value, index: pointIndex, globalName: resolvedGlobal };
             return updated;
         });
     };
@@ -512,56 +527,324 @@ export default function App() {
         });
     };
 
-    // Point editing functions
+    const resolveTagValue = (tag) => {
+        if (tag?.globalName) {
+            const match = globalVars.find((entry) => entry.name === tag.globalName);
+            const resolved = Number(match?.value);
+            if (Number.isFinite(resolved)) return resolved;
+        }
+        return Number(tag?.value) || 0;
+    };
+
+    const resolveSegmentEndIndex = (segmentIndex) => {
+        const idx = Math.max(1, Math.min(segmentEndIndices.length, Number(segmentIndex) || 0));
+        const endIndex = segmentEndIndices[idx - 1];
+        return Number.isFinite(endIndex) ? endIndex + 1 : 0;
+    };
+
+    const addGlobalVar = (name, value) => {
+        const cleaned = (name || "").trim();
+        if (!cleaned) return;
+        const numeric = Number(value);
+        setGlobalVars((prev) => {
+            const exists = prev.find((entry) => entry.name === cleaned);
+            if (exists) {
+                return prev.map((entry) =>
+                    entry.name === cleaned ? {...entry, value: Number.isFinite(numeric) ? numeric : entry.value} : entry
+                );
+            }
+            return [...prev, {name: cleaned, value: Number.isFinite(numeric) ? numeric : 0}];
+        });
+    };
+
+    const updateGlobalVar = (name, value) => {
+        const numeric = Number(value);
+        setGlobalVars((prev) =>
+            prev.map((entry) =>
+                entry.name === name
+                    ? {...entry, value: Number.isFinite(numeric) ? numeric : entry.value}
+                    : entry
+            )
+        );
+    };
+
+    const removeGlobalVar = (name) => {
+        setTags((prev) =>
+            prev.map((tag) =>
+                tag.globalName === name ? {...tag, value: resolveTagValue(tag), globalName: undefined} : tag
+            )
+        );
+        setGlobalVars((prev) => prev.filter((entry) => entry.name !== name));
+    };
+
+    const rebuildSegments = useCallback((segmentsList) => {
+        let anchor = {x: num(startPose.x), y: num(startPose.y), h: num(startPose.h)};
+        return segmentsList.map((segment) => {
+            const resolvedHeadingMode = segment.headingMode || headingMode;
+            const end = {
+                x: Number(segment.end?.x ?? anchor.x),
+                y: Number(segment.end?.y ?? anchor.y),
+            };
+            const allowHeadingOverride = segment.type === "line" || resolvedHeadingMode === "straight";
+            const endHeadingOverride = allowHeadingOverride && Number.isFinite(Number(segment.end?.h))
+                ? Number(segment.end.h)
+                : undefined;
+            let rebuilt;
+            if (segment.type === "bezier" && segment.control) {
+                rebuilt = buildBezierSegment({
+                    anchor,
+                    control: segment.control,
+                    end,
+                    headingMode: resolvedHeadingMode,
+                    endHeading: endHeadingValue,
+                    endHeadingOverride,
+                });
+            } else if (segment.type === "arc" && segment.mid) {
+                rebuilt = buildArcSegment({
+                    anchor,
+                    mid: segment.mid,
+                    end,
+                    headingMode: resolvedHeadingMode,
+                    endHeading: endHeadingValue,
+                    endHeadingOverride,
+                });
+            } else {
+                rebuilt = buildLineSegment({
+                    anchor,
+                    end,
+                    headingMode: resolvedHeadingMode,
+                    endHeading: endHeadingValue,
+                    endHeadingOverride,
+                });
+            }
+            anchor = rebuilt.end;
+            return {...rebuilt, headingMode: segment.headingMode};
+        });
+    }, [startPose, headingMode, endHeadingValue]);
+
+    const appendLineSegment = useCallback((x, y) => {
+        setSegments((prev) => {
+            const anchor = prev.length
+                ? prev[prev.length - 1].samples?.[prev[prev.length - 1].samples.length - 1]
+                : {x: num(startPose.x), y: num(startPose.y), h: num(startPose.h)};
+            const seg = buildLineSegment({
+                anchor,
+                end: {x, y},
+                headingMode,
+                endHeading: endHeadingValue,
+            });
+            return [...prev, seg];
+        });
+        setUndoStack((prev) => [...prev, {type: "point", count: 1}]);
+    }, [setSegments, headingMode, endHeadingValue, startPose]);
+
+    const appendBezierSegment = useCallback((control, end) => {
+        setSegments((prev) => {
+            const anchor = prev.length
+                ? prev[prev.length - 1].samples?.[prev[prev.length - 1].samples.length - 1]
+                : {x: num(startPose.x), y: num(startPose.y), h: num(startPose.h)};
+            const seg = buildBezierSegment({
+                anchor,
+                control,
+                end,
+                headingMode,
+                endHeading: endHeadingValue,
+            });
+            return [...prev, {...seg, headingMode}];
+        });
+        setUndoStack((prev) => [...prev, {type: "bezier", count: 1}]);
+    }, [setSegments, headingMode, endHeadingValue, startPose]);
+
+    const appendArcSegment = useCallback((mid, end) => {
+        setSegments((prev) => {
+            const anchor = prev.length
+                ? prev[prev.length - 1].samples?.[prev[prev.length - 1].samples.length - 1]
+                : {x: num(startPose.x), y: num(startPose.y), h: num(startPose.h)};
+            const seg = buildArcSegment({
+                anchor,
+                mid,
+                end,
+                headingMode,
+                endHeading: endHeadingValue,
+            });
+            return [...prev, {...seg, headingMode}];
+        });
+        setUndoStack((prev) => [...prev, {type: "arc", count: 1}]);
+    }, [setSegments, headingMode, endHeadingValue, startPose]);
+
+    const appendSegmentsFromSamples = useCallback((samples, shapeType = "draw") => {
+        if (!samples?.length) return;
+        setSegments((prev) => {
+            const next = [...prev];
+            let anchor = prev.length
+                ? prev[prev.length - 1].samples?.[prev[prev.length - 1].samples.length - 1]
+                : {x: num(startPose.x), y: num(startPose.y), h: num(startPose.h)};
+            samples.forEach((sample) => {
+                const seg = buildLineSegment({
+                    anchor,
+                    end: {x: sample.x, y: sample.y},
+                    headingMode,
+                    endHeading: endHeadingValue,
+                });
+                next.push(seg);
+                anchor = seg.end;
+            });
+            return next;
+        });
+        setUndoStack((prev) => [...prev, {type: shapeType, count: samples.length}]);
+    }, [setSegments, headingMode, endHeadingValue, startPose]);
+
+    // Point editing functions (segment endpoints)
     const updatePoint = (index, updates) => {
-        setPoints((prev) => {
-            const updated = [...prev];
-            updated[index] = {...updated[index], ...updates};
-            return updated;
+        setSegments((prev) => {
+            const next = prev.map((segment) => ({...segment, end: {...segment.end}}));
+            const target = next[index];
+            if (!target) return prev;
+            const nextEnd = {
+                x: updates.x !== undefined ? Number(updates.x) : Number(target.end?.x ?? 0),
+                y: updates.y !== undefined ? Number(updates.y) : Number(target.end?.y ?? 0),
+                h: updates.h !== undefined ? Number(updates.h) : Number(target.end?.h ?? 0),
+            };
+            next[index] = {...target, end: nextEnd};
+            return rebuildSegments(next);
+        });
+    };
+
+    const updateSegmentControl = (index, updates) => {
+        setSegments((prev) => {
+            const next = prev.map((segment) => ({...segment, control: segment.control ? {...segment.control} : segment.control}));
+            const target = next[index];
+            if (!target || target.type !== "bezier") return prev;
+            const control = {
+                x: updates.x !== undefined ? Number(updates.x) : Number(target.control?.x ?? 0),
+                y: updates.y !== undefined ? Number(updates.y) : Number(target.control?.y ?? 0),
+            };
+            next[index] = {...target, control};
+            return rebuildSegments(next);
+        });
+    };
+
+    const updateSegmentMid = (index, updates) => {
+        setSegments((prev) => {
+            const next = prev.map((segment) => ({...segment, mid: segment.mid ? {...segment.mid} : segment.mid}));
+            const target = next[index];
+            if (!target || target.type !== "arc") return prev;
+            const mid = {
+                x: updates.x !== undefined ? Number(updates.x) : Number(target.mid?.x ?? 0),
+                y: updates.y !== undefined ? Number(updates.y) : Number(target.mid?.y ?? 0),
+            };
+            next[index] = {...target, mid};
+            return rebuildSegments(next);
+        });
+    };
+
+    const updateSegmentHeadingMode = (index, mode) => {
+        setSegments((prev) => {
+            const next = prev.map((segment) => ({...segment}));
+            const target = next[index];
+            if (!target || (target.type !== "bezier" && target.type !== "arc")) return prev;
+            const nextEnd = {...target.end};
+            if (mode === "straight") {
+                nextEnd.h = Number.isFinite(Number(nextEnd?.h)) ? Number(nextEnd.h) : endHeadingValue;
+            }
+            next[index] = {...target, headingMode: mode, end: nextEnd};
+            return rebuildSegments(next);
         });
     };
 
     // Update multiple points at once (for multi-selection drag)
     const updatePoints = (indices, deltaX, deltaY) => {
-        setPoints((prev) => {
-            const updated = [...prev];
-            indices.forEach(index => {
-                if (updated[index]) {
-                    updated[index] = {
-                        ...updated[index],
-                        x: updated[index].x + deltaX,
-                        y: updated[index].y + deltaY,
-                    };
-                }
+        setSegments((prev) => {
+            const next = prev.map((segment) => ({...segment, end: {...segment.end}}));
+            indices.forEach((index) => {
+                if (!next[index]) return;
+                next[index].end = {
+                    ...next[index].end,
+                    x: Number(next[index].end?.x ?? 0) + deltaX,
+                    y: Number(next[index].end?.y ?? 0) + deltaY,
+                };
             });
-            return updated;
+            return rebuildSegments(next);
         });
     };
 
     const deletePoint = (index) => {
-        setPoints((prev) => prev.filter((_, i) => i !== index));
-        setSelectedPointIndices(prev => prev.filter(i => i !== index).map(i => i > index ? i - 1 : i));
-        // Update tags that reference points after the deleted one
-        setTags((prev) => prev
-            .filter(tag => tag.index !== index + 1) // Remove tags for deleted point
-            .map(tag => tag.index > index + 1 ? {...tag, index: tag.index - 1} : tag)
+        setSegments((prev) => rebuildSegments(prev.filter((_, i) => i !== index)));
+        setSelectedPointIndices((prev) => prev.filter((i) => i !== index).map((i) => (i > index ? i - 1 : i)));
+        setExpandedPointIndex((prev) => {
+            if (prev === null) return prev;
+            if (prev === index) return null;
+            if (prev > index) return prev - 1;
+            return prev;
+        });
+        setTags((prev) =>
+            prev
+                .filter((tag) => tag.index !== index + 1)
+                .map((tag) => (tag.index > index + 1 ? {...tag, index: tag.index - 1} : tag))
         );
     };
 
     // Delete multiple selected points
     const deletePoints = (indices) => {
-        const sortedIndices = [...indices].sort((a, b) => b - a); // Sort descending
-        setPoints((prev) => prev.filter((_, i) => !indices.includes(i)));
+        const sortedIndices = [...indices].sort((a, b) => b - a);
+        setSegments((prev) => rebuildSegments(prev.filter((_, i) => !indices.includes(i))));
         setSelectedPointIndices([]);
-        // Update tags
+        setExpandedPointIndex(null);
         setTags((prev) => {
             let updatedTags = [...prev];
-            sortedIndices.forEach(index => {
+            sortedIndices.forEach((index) => {
                 updatedTags = updatedTags
-                    .filter(tag => tag.index !== index + 1)
-                    .map(tag => tag.index > index + 1 ? {...tag, index: tag.index - 1} : tag);
+                    .filter((tag) => tag.index !== index + 1)
+                    .map((tag) => (tag.index > index + 1 ? {...tag, index: tag.index - 1} : tag));
             });
             return updatedTags;
+        });
+    };
+
+    const reorderPoints = (fromIndex, toIndex) => {
+        if (fromIndex === toIndex) return;
+        setSegmentsInternal((prev) => {
+            const next = [...prev];
+            const [moved] = next.splice(fromIndex, 1);
+            next.splice(toIndex, 0, moved);
+            return rebuildSegments(next);
+        });
+        setTags((prev) =>
+            prev.map((tag) => {
+                const oldIdx = (Number(tag.index) || 0) - 1;
+                let newIdx = oldIdx;
+                if (oldIdx === fromIndex) {
+                    newIdx = toIndex;
+                } else if (fromIndex < toIndex && oldIdx > fromIndex && oldIdx <= toIndex) {
+                    newIdx = oldIdx - 1;
+                } else if (toIndex < fromIndex && oldIdx >= toIndex && oldIdx < fromIndex) {
+                    newIdx = oldIdx + 1;
+                }
+                return {...tag, index: newIdx + 1};
+            })
+        );
+        setSelectedPointIndices((prev) =>
+            prev.map((idx) => {
+                if (idx === fromIndex) return toIndex;
+                if (fromIndex < toIndex && idx > fromIndex && idx <= toIndex) return idx - 1;
+                if (toIndex < fromIndex && idx >= toIndex && idx < fromIndex) return idx + 1;
+                return idx;
+            })
+        );
+        setExpandedPointIndex((prev) => {
+            if (prev === null) return prev;
+            if (prev === fromIndex) return toIndex;
+            if (fromIndex < toIndex && prev > fromIndex && prev <= toIndex) return prev - 1;
+            if (toIndex < fromIndex && prev >= toIndex && prev < fromIndex) return prev + 1;
+            return prev;
+        });
+    };
+
+    const togglePointExpansion = (index) => {
+        setExpandedPointIndex((prev) => {
+            const next = prev === index ? null : index;
+            setSelectedPointIndices(next === null ? [] : [index]);
+            return next;
         });
     };
 
@@ -574,8 +857,9 @@ export default function App() {
 
     const switchSides = () => {
         // Mirror all points and start pose along the Y-axis (flip Y coordinates, top-bottom)
-        // Also swap autoAimRed <-> autoAimBlue tags
-        
+        // Also toggle the alliance parameter.
+        setAlliance((prev) => (prev === "red" ? "blue" : "red"));
+
         // Mirror start pose
         setStartPose((prev) => {
             const newH = -prev.h; // Flip heading vertically
@@ -586,25 +870,25 @@ export default function App() {
             };
         });
 
-        // Mirror all points
-        setPointsWithoutModal((prev) => prev.map((p) => {
-            const newH = p.h !== undefined ? -p.h : undefined;
-            return {
-                ...p,
-                y: -p.y,
-                h: newH !== undefined ? normDeg(newH) : undefined, // Mirror heading angle and normalize
-            };
-        }));
-
-        // Swap autoAimRed <-> autoAimBlue tags
-        setTags((prev) => prev.map((tag) => {
-            if (tag.name === "autoAimRed") {
-                return { ...tag, name: "autoAimBlue" };
-            } else if (tag.name === "autoAimBlue") {
-                return { ...tag, name: "autoAimRed" };
+        // Mirror all segments
+        setSegmentsWithoutModal((prev) => rebuildSegments(prev.map((segment) => {
+            const next = {...segment};
+            if (segment.end) {
+                const newH = segment.end.h !== undefined ? -segment.end.h : undefined;
+                next.end = {
+                    ...segment.end,
+                    y: -segment.end.y,
+                    h: newH !== undefined ? normDeg(newH) : undefined,
+                };
             }
-            return tag;
-        }));
+            if (segment.control) {
+                next.control = {...segment.control, y: -segment.control.y};
+            }
+            if (segment.mid) {
+                next.mid = {...segment.mid, y: -segment.mid.y};
+            }
+            return next;
+        })));
 
         // Stop playback when switching sides
         stopPlayback();
@@ -629,10 +913,15 @@ export default function App() {
         const payload = {
             version: 1,
             start: [num(startPose.x), num(startPose.y), num(startPose.h)],
-            points: points.map((p) => [Number(p.x), Number(p.y), Number(p.h ?? 0)]),
+            points: pathPoints.map((p) => [Number(p.x), Number(p.y), Number(p.h ?? 0)]),
             velocity: Number(velocity) || 0,
             tolerance: Number(tolerance) || 0,
-            tags: tags.map((tag) => ({index: Number(tag.index) || 0, name: String(tag.name || ""), value: Number(tag.value) || 0})),
+            alliance,
+            tags: tags.map((tag) => ({
+                index: resolveSegmentEndIndex(tag.index),
+                name: String(tag.name || ""),
+                value: resolveTagValue(tag),
+            })),
         };
         // Ensure robot is initialized before upload
         try {
@@ -641,7 +930,7 @@ export default function App() {
             // ignore
         }
 
-        return fetch(`http://${hubIp}:8099/points`, {
+        return fetch(`http://${HUB_IP}:8099/points`, {
             method: "POST",
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify(payload),
@@ -701,7 +990,7 @@ export default function App() {
     const doRun = () => {
         if (runTimerRef.current) clearTimeout(runTimerRef.current);
         setRunStatus("sending");
-        fetch(`http://${hubIp}:8099/run`, {
+        fetch(`http://${HUB_IP}:8099/run`, {
             method: "POST",
         })
             .then((response) => {
@@ -724,12 +1013,12 @@ export default function App() {
         const sh = toFixed(num(startPose.h));
         const poseLines = [
             `    new Pose2D(DistanceUnit.INCH, ${sx}, ${sy}, AngleUnit.DEGREES, ${sh})`,
-            ...points
+            ...pathPoints
                 .map((p) => ({x: toFixed(p.x), y: toFixed(p.y), h: toFixed(num(p.h ?? 0))}))
                 .map((p) => `    new Pose2D(DistanceUnit.INCH, ${p.x}, ${p.y}, AngleUnit.DEGREES, ${p.h})`),
         ].join(",\n");
         const tagsBlock = tags
-            .map((tag) => `    new Tag("${(tag.name ?? "").replace(/"/g, '\\"')}", ${Number(tag.value) || 0}, ${Number(tag.index) || 0})`)
+            .map((tag) => `    new Tag("${(tag.name ?? "").replace(/"/g, '\\"')}", ${resolveTagValue(tag)}, ${Number(tag.index) || 0})`)
             .join(",\n");
         return `// ---- PATH ----
 public static Pose2D[] path = new Pose2D[] {
@@ -749,13 +1038,28 @@ ${tagsBlock}
 public static double VELOCITY_IN_S = ${toFixed(velocity, 2)};
 public static double MAX_ACCEL_IN_S2 = ${toFixed(Number(maxAccel) || 0, 2)};
 public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
-    }, [points, startPose, tags, velocity, maxAccel, tolerance]);
+    }, [pathPoints, startPose, tags, velocity, maxAccel, tolerance, globalVars]);
 
     const buildSerializable = () => ({
         version: 1,
         createdAt: new Date().toISOString(),
+        alliance,
         start: {x: num(startPose.x), y: num(startPose.y), h: num(startPose.h)},
-        points: points.map((p) => ({x: Number(p.x), y: Number(p.y), h: Number(p.h ?? 0)})),
+        points: pathPoints.map((p) => ({x: Number(p.x), y: Number(p.y), h: Number(p.h ?? 0)})),
+        segments: segments.map((segment) => ({
+            type: segment.type,
+            headingMode: segment.headingMode,
+            end: segment.end ? {x: Number(segment.end.x), y: Number(segment.end.y), h: Number(segment.end.h ?? 0)} : undefined,
+            control: segment.control ? {x: Number(segment.control.x), y: Number(segment.control.y)} : undefined,
+            mid: segment.mid ? {x: Number(segment.mid.x), y: Number(segment.mid.y)} : undefined,
+            samples: Array.isArray(segment.samples)
+                ? segment.samples.map((sample) => ({
+                    x: Number(sample.x),
+                    y: Number(sample.y),
+                    h: Number(sample.h ?? 0),
+                }))
+                : [],
+        })),
         headingMode,
         endHeading: endHeadingValue,
         velocity: Number(velocity) || 0,
@@ -763,7 +1067,15 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
         tolerance: Number(tolerance) || 0,
         snapInches: Number(snapInches) || 0,
         robot: {...robotDimensions},
-        tags: tags.map((t) => ({index: Number(t.index) || 0, name: String(t.name || ""), value: Number(t.value) || 0})),
+        tags: tags.map((t) => ({
+            index: resolveSegmentEndIndex(t.index),
+            name: String(t.name || ""),
+            value: resolveTagValue(t),
+        })),
+        globals: globalVars.map((entry) => ({name: entry.name, value: Number(entry.value) || 0})),
+        tagBindings: tags
+            .map((tag, idx) => (tag.globalName ? {tagIndex: idx, globalName: tag.globalName} : null))
+            .filter(Boolean),
     });
 
     const onExportPath = () => {
@@ -789,6 +1101,14 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
             const text = await file.text();
             const data = JSON.parse(text);
             const getNum = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
+            const computeEndIndices = (segmentsList) => {
+                let cursor = -1;
+                return segmentsList.map((segment) => {
+                    cursor += segment.samples?.length || 0;
+                    return cursor;
+                });
+            };
+            let importedSegments = null;
 
             if (data.start) {
                 if (Array.isArray(data.start)) {
@@ -797,12 +1117,57 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                     setStartPose({x: getNum(data.start.x), y: getNum(data.start.y), h: normDeg(getNum(data.start.h))});
                 }
             }
-            if (Array.isArray(data.points)) {
+            const normalizeSegments = (segmentList) => {
+                if (!Array.isArray(segmentList)) return [];
+                return segmentList.map((segment) => {
+                    const type = typeof segment.type === "string" ? segment.type : "line";
+                    const headingModeOverride = typeof segment.headingMode === "string" ? segment.headingMode : undefined;
+                    const end = segment.end ?? {};
+                    const rawSamples = Array.isArray(segment.samples) ? segment.samples : [];
+                    const samples = rawSamples
+                        .map((sample) => ({
+                            x: getNum(sample.x),
+                            y: getNum(sample.y),
+                            h: normDeg(getNum(sample.h)),
+                        }))
+                        .filter((sample) => Number.isFinite(sample.x) && Number.isFinite(sample.y));
+                    const endPoint = samples.length
+                        ? samples[samples.length - 1]
+                        : {
+                            x: getNum(end.x),
+                            y: getNum(end.y),
+                            h: normDeg(getNum(end.h)),
+                        };
+                    if (!Number.isFinite(endPoint.x) || !Number.isFinite(endPoint.y)) return null;
+                    return {
+                        type,
+                        headingMode: headingModeOverride,
+                        end: {x: endPoint.x, y: endPoint.y, h: endPoint.h},
+                        control: segment.control ? {x: getNum(segment.control.x), y: getNum(segment.control.y)} : undefined,
+                        mid: segment.mid ? {x: getNum(segment.mid.x), y: getNum(segment.mid.y)} : undefined,
+                        samples: samples.length ? samples : [{...endPoint}],
+                    };
+                }).filter(Boolean);
+            };
+
+            if (Array.isArray(data.segments) && data.segments.length) {
+                importedSegments = normalizeSegments(data.segments);
+                if (importedSegments.length) {
+                    setSegmentsWithoutModal(importedSegments);
+                }
+            } else if (Array.isArray(data.points)) {
                 const pts = data.points.map((p) =>
                     Array.isArray(p) ? {x: getNum(p[0]), y: getNum(p[1]), h: normDeg(getNum(p[2]))} :
                         {x: getNum(p.x), y: getNum(p.y), h: normDeg(getNum(p.h))}
                 );
-                setPointsWithoutModal(pts);
+                importedSegments = pts
+                    .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+                    .map((point) => ({
+                        type: "line",
+                        end: {x: point.x, y: point.y, h: point.h},
+                        samples: [{x: point.x, y: point.y, h: point.h}],
+                    }));
+                setSegmentsWithoutModal(importedSegments);
             }
             if (typeof data.headingMode === "string") setHeadingMode(data.headingMode);
             if (Number.isFinite(Number(data.endHeading))) setEndHeading(String(Number(data.endHeading)));
@@ -811,12 +1176,49 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
             if (Number.isFinite(Number(data.tolerance))) setTolerance(String(Number(data.tolerance)));
             if (Number.isFinite(Number(data.snapInches))) setSnapInches(String(Number(data.snapInches)));
             if (data.robot && typeof data.robot === "object") setRobotDimensions({...robotDimensions, ...data.robot});
-            if (Array.isArray(data.tags)) setTags(data.tags.map((t) => ({
-                index: getNum(t.index),
-                name: String(t.name || ""),
-                value: getNum(t.value),
-            })));
+            if (Array.isArray(data.globals)) {
+                setGlobalVars(data.globals.map((entry) => ({
+                    name: String(entry.name || ""),
+                    value: getNum(entry.value),
+                })).filter((entry) => entry.name));
+            }
+            if (Array.isArray(data.tags)) {
+                let importedTags = data.tags.map((t) => ({
+                    index: getNum(t.index),
+                    name: String(t.name || ""),
+                    value: getNum(t.value),
+                }));
+                if (importedSegments?.length) {
+                    const endIndices = computeEndIndices(importedSegments);
+                    importedTags = importedTags.map((tag) => {
+                        const expandedIndex = getNum(tag.index);
+                        if (!Number.isFinite(expandedIndex) || expandedIndex <= 0) return tag;
+                        let segmentIndex = endIndices.findIndex((endIndex) => endIndex + 1 === expandedIndex);
+                        if (segmentIndex < 0) {
+                            segmentIndex = endIndices.findIndex((endIndex) => endIndex + 1 >= expandedIndex);
+                        }
+                        const resolved = segmentIndex >= 0 ? segmentIndex + 1 : Math.max(1, endIndices.length);
+                        return {...tag, index: resolved};
+                    });
+                }
+                if (Array.isArray(data.tagBindings)) {
+                    data.tagBindings.forEach((binding) => {
+                        const tagIndex = getNum(binding.tagIndex, -1);
+                        const globalName = String(binding.globalName || "").trim();
+                        if (tagIndex >= 0 && tagIndex < importedTags.length && globalName) {
+                            importedTags[tagIndex] = {...importedTags[tagIndex], globalName};
+                        }
+                    });
+                }
+                setTags(importedTags);
+            }
 
+            if (typeof data.alliance === "string") {
+                const normalized = data.alliance.toLowerCase();
+                if (normalized === "red" || normalized === "blue") {
+                    setAlliance(normalized);
+                }
+            }
             setBezierTemp(null);
             setArcTemp(null);
             setPreview(null);
@@ -830,7 +1232,7 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
     };
 
     const handleTogglePlay = () => {
-        if (!points.length || totalLength <= 0) return;
+        if (!pathPoints.length || totalLength <= 0) return;
         togglePlay();
     };
 
@@ -848,8 +1250,11 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
             onClose={() => setShowSetupModal(false)}
             onSave={handleSaveSettings}
             initialSettings={{ 
-                hubIp, 
                 fieldSize, 
+                showGrid,
+                gridStep,
+                gridStepEntry,
+                robotDimensions,
                 palette,
                 themeName,
                 blurStrength,
@@ -857,13 +1262,6 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                 cardOpacity,
                 uiScale
             }}
-        />
-        <TagModal
-            isOpen={showTagModal}
-            onClose={() => setShowTagModal(false)}
-            onAddTag={addTagFromModal}
-            pointIndex={pendingTagPointIndex}
-            pointsCount={points.length}
         />
         <ExportModal
             isOpen={showExportModal}
@@ -880,6 +1278,8 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                     setDrawTemp(null);
                     setPreview(null);
                 }}
+                drawMode={drawMode}
+                setDrawMode={setDrawMode}
                 headingMode={headingMode}
                 setHeadingMode={setHeadingMode}
                 endHeading={endHeading}
@@ -888,8 +1288,6 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                 setVelocity={setVelocity}
                 maxAccel={maxAccel}
                 setMaxAccel={setMaxAccel}
-                playSpeed={playSpeed}
-                setPlaySpeed={setPlaySpeed}
                 tolerance={tolerance}
                 setTolerance={setTolerance}
                 snapInches={snapInches}
@@ -900,21 +1298,18 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                 togglePlaceStart={togglePlaceStart}
                 useLivePose={useLivePoseAsStart}
                 livePoseAvailable={Boolean(livePose)}
-                showGrid={showGrid}
-                setShowGrid={setShowGrid}
-                gridStepEntry={gridStepEntry}
-                setGridStepEntry={setGridStepEntry}
-                commitGridStep={commitGridStep}
-                robotDimensions={robotDimensions}
-                setRobotDimensions={setRobotDimensions}
                 tagName={tagName}
                 setTagName={setTagName}
                 tagValue={tagValue}
                 setTagValue={setTagValue}
+                tagValueSource={tagValueSource}
+                setTagValueSource={setTagValueSource}
+                tagGlobalName={tagGlobalName}
+                setTagGlobalName={setTagGlobalName}
                 tagPointIndex={tagPointIndex}
                 setTagPointIndex={setTagPointIndex}
                 addTag={addTag}
-                pointsLength={points.length}
+                pointsLength={displayPoints.length}
                 editMode={editMode}
                 toggleEditMode={toggleEditMode}
                 selectedPointIndices={selectedPointIndices}
@@ -922,10 +1317,14 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                 updatePoint={updatePoint}
                 deletePoint={deletePoint}
                 deletePoints={deletePoints}
-                points={points}
+                points={displayPoints}
                 tags={tags}
                 onRemoveTag={removeTag}
                 onEditTag={editTag}
+                globalVars={globalVars}
+                onAddGlobalVar={addGlobalVar}
+                onUpdateGlobalVar={updateGlobalVar}
+                onRemoveGlobalVar={removeGlobalVar}
                 onOpenSettings={() => setShowSetupModal(true)}
             />
 
@@ -947,12 +1346,17 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                     gridStep={gridStep}
                     startPose={startPose}
                     setStartPose={setStartPose}
-                    points={points}
-                    setPoints={setPoints}
-                    setUndoStack={setUndoStack}
+                    pathPoints={pathPoints}
+                    displayPoints={displayPoints}
+                    segments={segments}
+                    onAddLineSegment={appendLineSegment}
+                    onAddBezierSegment={appendBezierSegment}
+                    onAddArcSegment={appendArcSegment}
+                    onAddSamples={appendSegmentsFromSamples}
                     placeStart={placeStart}
                     setPlaceStart={setPlaceStart}
                     shapeType={shapeType}
+                    drawMode={drawMode}
                     headingMode={headingMode}
                     endHeading={endHeadingValue}
                     snapInches={snapInches}
@@ -963,19 +1367,22 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                     arcTemp={arcTemp}
                     setArcTemp={setArcTemp}
                     drawTemp={drawTemp}
-                    setDrawTemp={setDrawTemp}
-                    robot={robotDimensions}
-                    livePose={livePose}
-                    playState={playState}
-                    playDist={playDist}
+                setDrawTemp={setDrawTemp}
+                robot={robotDimensions}
+                livePose={livePose}
+                playState={playState}
+                playDist={playDist}
                     waypoints={waypoints}
                     previewMarker="dotArrow"
-                    editMode={editMode}
-                    selectedPointIndices={selectedPointIndices}
-                    setSelectedPointIndices={setSelectedPointIndices}
+                editMode={editMode}
+                selectedPointIndices={selectedPointIndices}
+                setSelectedPointIndices={setSelectedPointIndices}
                     updatePoint={updatePoint}
                     updatePoints={updatePoints}
                     deletePoints={deletePoints}
+                    onUpdateSegmentControl={updateSegmentControl}
+                    onUpdateSegmentMid={updateSegmentMid}
+                    highlightSelection={expandedPointIndex !== null}
                     palette={palette}
                     fieldSize={fieldSize}
                 />
@@ -1001,7 +1408,7 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                 playState={playState}
                 onTogglePlay={handleTogglePlay}
                 onStop={handleStop}
-                pointsCount={points.length}
+                pointsCount={displayPoints.length}
                 totalLength={totalLength}
                 velocity={velocity}
                 playDist={playDist}
@@ -1013,11 +1420,22 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                 onEditTag={editTag}
                 onReorderTags={reorderTags}
                 onAddTag={addTagFromRunPanel}
+                onReorderPoints={reorderPoints}
+                onTogglePointExpand={togglePointExpansion}
+                expandedPointIndex={expandedPointIndex}
+                onUpdatePoint={updatePoint}
+                onUpdateSegmentControl={updateSegmentControl}
+                onUpdateSegmentMid={updateSegmentMid}
+                onUpdateSegmentHeadingMode={updateSegmentHeadingMode}
                 estTimeSec={estRunTimeSeconds}
                 onExportPath={onExportPath}
                 onImportFile={onImportPath}
-                points={points}
+                points={displayPoints}
+                segments={segments}
                 onSwitchSides={switchSides}
+                alliance={alliance}
+                onAllianceChange={setAlliance}
+                globalVars={globalVars}
                 isConnected={isConnected}
                 robotStatus={robotStatus}
                 robotConfig={robotConfig}
@@ -1030,3 +1448,8 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
         </div>
     );
 }
+
+
+
+
+
