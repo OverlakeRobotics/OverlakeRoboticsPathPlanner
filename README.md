@@ -14,13 +14,14 @@ Optional: Edit `config.js` (next to `index.html`) to customize defaults and tag 
 ## Features
 
 ### Path building
-- Place points by clicking on the field.
-- Choose segment types: Line, Bezier, Arc, or Free draw.
-- Switch alliance (Red/Blue) or mirror the path with one click.
+- Place points by clicking on the field
+- Choose segment types: Line, Bezier, Arc, or Free draw
+- Switch alliance (Red/Blue) or mirror the path with one click
 
 ### Fast upload
-- Upload paths to the robot instantly and see them running
-- Requires code from https://github.com/OverlakeRobotics/OverlakeRoboticsLibrary to be on the robot for direct upload
+- Connect to your robot's wifi and upload paths instantly
+- Real time pose updating to see the robot position on screen
+- Requires code from https://github.com/OverlakeRobotics/OverlakeRoboticsLibrary to be on the robot for direct upload and pose updating
 
 ### Edit mode
 - Select and drag points directly on the field
@@ -28,16 +29,16 @@ Optional: Edit `config.js` (next to `index.html`) to customize defaults and tag 
 - Reorder points by dragging them in the points list
 
 ### Tags
-Tags are metadata on points that the robot can read (velocity changes, waits, etc.)
+Tags are metadata on points that the robot can read (velocity changes, waits, launch artifacts, etc.)
 - Add tags to any point from the right panel
 - You can edit the code in your robots OpMode to change what each tag does
 - Tags use templates from `config.js`, including units and defaults
 
 ### Global variables
-Global variables let you drive many tag values from a single number.
-- Create globals in the left panel.
-- Set a tag value to use a global variable.
-- Change the global and all linked tags update automatically.
+Global variables let you update many tag values from a single number.
+- Create globals in the left panel
+- Set a tag value to use a global variable
+- Change the global and all linked tags update automatically
 
 ### Import / Export
 - Export paths as JSON for sharing or later edits.
