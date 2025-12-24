@@ -31,6 +31,7 @@ Optional: Edit `config.js` (next to `index.html`) to customize defaults and tag 
 ### Tags
 Tags are metadata on points that the robot can read (velocity changes, waits, launch artifacts, etc.)
 - Add tags to any point from the right panel
+- Tags are run once the robot reaches the point the tag is attached to
 - You can edit the code in your robots OpMode to change what each tag does
 - Tags use templates from `config.js`, including units and defaults
 

@@ -44,6 +44,8 @@ export default function RunPanel({
                                      onTogglePointExpand,
                                      expandedPointIndex,
                                      onUpdatePoint,
+                                     startPose,
+                                     onUpdateStartPose,
                                      // NEW:
                                      estTimeSec,
                                      onExportPath,
@@ -91,6 +93,7 @@ export default function RunPanel({
     const [selectedOpMode, setSelectedOpMode] = useState("");
 
     const [isAddingTag, setIsAddingTag] = useState(false);
+    const [addTagPointIndex, setAddTagPointIndex] = useState(null);
     const [newTagName, setNewTagName] = useState("");
     const [newTagValue, setNewTagValue] = useState("");
     const [newTagValueSource, setNewTagValueSource] = useState("manual");
@@ -156,7 +159,8 @@ export default function RunPanel({
     };
     // Group tags by point index
     const tagsByPoint = tags.reduce((acc, tag, index) => {
-        const pointIndex = tag.index - 1; // Convert to 0-based
+        const rawIndex = Number(tag.index) || 0;
+        const pointIndex = rawIndex === 0 ? -1 : rawIndex - 1; // -1 is start
         if (!acc[pointIndex]) {
             acc[pointIndex] = [];
         }
@@ -172,6 +176,26 @@ export default function RunPanel({
         }
         return Number(tag?.value) || 0;
     };
+
+    const clampTagIndex = (value, fallback) => {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed)) return fallback;
+        if (parsed <= 0) return 0;
+        return Math.max(1, Math.min(pointsCount, parsed));
+    };
+
+    useEffect(() => {
+        if (addTagPointIndex === null) return;
+        if (expandedPointIndex !== addTagPointIndex) {
+            setIsAddingTag(false);
+            setAddTagPointIndex(null);
+            setNewTagName("");
+            setNewTagValue("");
+            setNewTagPointIndex("");
+            setNewTagValueSource("manual");
+            setNewTagGlobalName("");
+        }
+    }, [expandedPointIndex, addTagPointIndex]);
 
 
     // Keep a ref to the latest robotStatus for async waiting checks
@@ -453,11 +477,371 @@ export default function RunPanel({
                         <h3>Points and Tags</h3>
                         <p>Organize actions by path point</p>
                     </div>
-                    {points.length === 0 ? (
-                        <p className="helper-text">Add points to the path to create tags</p>
-                    ) : (
-                        <>
-                            {points.map((point, pointIndex) => {
+                    <>
+                        {points.length === 0 && (
+                            <p className="helper-text">Add points to the path to create tags</p>
+                        )}
+                        <div
+                            className="point-section"
+                        >
+                            <div
+                                className="point-header"
+                                role="button"
+                                tabIndex={0}
+                                aria-expanded={expandedPointIndex === -1}
+                                onClick={() => onTogglePointExpand?.(-1)}
+                                onKeyDown={(event) => {
+                                    if (event.key === "Enter" || event.key === " ") {
+                                        event.preventDefault();
+                                        onTogglePointExpand?.(-1);
+                                    }
+                                }}
+                            >
+                                <div>
+                                    <h4>Start Point</h4>
+                                    <p>({formatNumber(startPose?.x, 1) || "0"}, {formatNumber(startPose?.y, 1) || "0"}){startPose?.h !== undefined ? ` (heading ${formatNumber(startPose.h, 1)} deg)` : ""}</p>
+                                    {(tagsByPoint[-1] || []).length > 0 && (
+                                        <p className="tag-count">{(tagsByPoint[-1] || []).length} tag{(tagsByPoint[-1] || []).length !== 1 ? 's' : ''}</p>
+                                    )}
+                                </div>
+                                <span className="collapse-caret">{expandedPointIndex === -1 ? "\u25BE" : "\u25B8"}</span>
+                            </div>
+
+                            {((expandedPointIndex === -1) || (closingPointIndex === -1)) && (
+                                <div
+                                    className={`point-tags-shell${expandedPointIndex === -1 ? " open" : ""}${closingPointIndex === -1 ? " closing" : ""}`}
+                                >
+                                    <div className="point-tags-content">
+                                        <div className="field-grid">
+                                            <div className="field">
+                                                <label>X (in)</label>
+                                                <NumberField
+                                                    value={startPose?.x ?? 0}
+                                                    step="0.1"
+                                                    onCommit={(value) => onUpdateStartPose?.({ x: value })}
+                                                />
+                                            </div>
+                                            <div className="field">
+                                                <label>Y (in)</label>
+                                                <NumberField
+                                                    value={startPose?.y ?? 0}
+                                                    step="0.1"
+                                                    onCommit={(value) => onUpdateStartPose?.({ y: value })}
+                                                />
+                                            </div>
+                                            <div className="field">
+                                                <label>Heading (deg)</label>
+                                                <NumberField
+                                                    value={startPose?.h ?? 0}
+                                                    step="1"
+                                                    onCommit={(value) => onUpdateStartPose?.({ h: value })}
+                                                />
+                                            </div>
+                                        </div>
+                                        {(tagsByPoint[-1] || []).length > 0 ? (
+                                            <div className="point-tag-list">
+                                                {(tagsByPoint[-1] || []).map((tag) => {
+                                                    const isEditing = editingIndex === tag.originalIndex;
+
+                                                    return (
+                                                        <div
+                                                            key={tag.originalIndex}
+                                                            className={`point-tag-item ${draggedIndex === tag.originalIndex ? 'dragging' : ''} ${dragOverIndex === tag.originalIndex ? 'drag-over' : ''}`}
+                                                            draggable={!isEditing}
+                                                            onDragStart={(e) => {
+                                                                if (!isEditing) {
+                                                                    setDraggedIndex(tag.originalIndex);
+                                                                    e.dataTransfer.effectAllowed = 'move';
+                                                                    e.dataTransfer.setData('text/plain', tag.originalIndex.toString());
+                                                                }
+                                                            }}
+                                                            onDragEnter={(e) => {
+                                                                e.preventDefault();
+                                                                if (draggedIndex !== null && draggedIndex !== tag.originalIndex) {
+                                                                    setDragOverIndex(tag.originalIndex);
+                                                                }
+                                                            }}
+                                                            onDragLeave={(e) => {
+                                                                e.preventDefault();
+                                                                if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget)) {
+                                                                    setDragOverIndex(null);
+                                                                }
+                                                            }}
+                                                            onDragOver={(e) => {
+                                                                e.preventDefault();
+                                                                e.dataTransfer.dropEffect = 'move';
+                                                            }}
+                                                            onDrop={(e) => {
+                                                                e.preventDefault();
+                                                                e.stopPropagation();
+                                                                if (draggedIndex !== null && draggedIndex !== tag.originalIndex && onReorderTags) {
+                                                                    onReorderTags(draggedIndex, tag.originalIndex);
+                                                                }
+                                                                setDraggedIndex(null);
+                                                                setDragOverIndex(null);
+                                                            }}
+                                                            onDragEnd={() => {
+                                                                setDraggedIndex(null);
+                                                                setDragOverIndex(null);
+                                                            }}
+                                                        >
+                                                            {isEditing ? (
+                                                                <>
+                                                                    <div className="field">
+                                                                        <label>Tag</label>
+                                                                        <select
+                                                                            value={editName}
+                                                                            onChange={(e) => setEditName(e.target.value)}
+                                                                        >
+                                                                            <option value="">-- Select Tag Type --</option>
+                                                                            {TAG_TEMPLATES.map((template) => (
+                                                                                <option key={template.name} value={template.name}>
+                                                                                    {template.name}{template.unit ? ` - ${template.unit}` : ""}
+                                                                                </option>
+                                                                            ))}
+                                                                        </select>
+                                                                    </div>
+                                                                    <div className="field-grid">
+                                                                        <div className="field">
+                                                                            <label>Value</label>
+                                                                            <input
+                                                                                type="number"
+                                                                                value={editValue}
+                                                                                onChange={(e) => setEditValue(Number(e.target.value))}
+                                                                                disabled={editValueSource === "global"}
+                                                                            />
+                                                                        </div>
+                                                                        <div className="field">
+                                                                            <label>Value source</label>
+                                                                            <select
+                                                                                value={editValueSource}
+                                                                                onChange={(e) => setEditValueSource(e.target.value)}
+                                                                            >
+                                                                                <option value="manual">Manual</option>
+                                                                                <option value="global" disabled={!globalVars?.length}>Global variable</option>
+                                                                            </select>
+                                                                        </div>
+                                                                        {editValueSource === "global" && (
+                                                                            <div className="field">
+                                                                                <label>Global variable</label>
+                                                                                <select
+                                                                                    value={editGlobalName}
+                                                                                    onChange={(e) => setEditGlobalName(e.target.value)}
+                                                                                >
+                                                                                    <option value="">-- Select global --</option>
+                                                                                    {globalVars?.map((entry) => (
+                                                                                        <option key={entry.name} value={entry.name}>
+                                                                                            {entry.name}
+                                                                                        </option>
+                                                                                    ))}
+                                                                                </select>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                    <div className="point-tag-actions">
+                                                                        <button
+                                                                            className="btn primary"
+                                                                            onClick={() => {
+                                                                                if (editName.trim() && onEditTag) {
+                                                                                    const globalName = editValueSource === "global" ? editGlobalName : undefined;
+                                                                                    if (editValueSource !== "global" || globalName) {
+                                                                                        onEditTag(tag.originalIndex, editName.trim(), editValue, editPointIndex, globalName);
+                                                                                    }
+                                                                                }
+                                                                                setEditingIndex(null);
+                                                                            }}
+                                                                            disabled={editValueSource === "global" && !editGlobalName}
+                                                                        >
+                                                                            Save
+                                                                        </button>
+                                                                        <button
+                                                                            className="btn ghost"
+                                                                            onClick={() => setEditingIndex(null)}
+                                                                        >
+                                                                            Cancel
+                                                                        </button>
+                                                                    </div>
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    <div className="point-tag-header">
+                                                                        <span className="drag-handle" title="Drag to reorder">::</span>
+                                                                        <div style={{flex: 1, minWidth: 0}}>
+                                                                            <span className="point-tag-name">{tag.name}</span>
+                                                                            <div className="point-tag-value">
+                                                                                {(() => {
+                                                                                    const template = TAG_TEMPLATES.find((entry) => entry.name === tag.name);
+                                                                                    const unit = template?.unit ? ` ${template.unit}` : "";
+                                                                                    const valueLabel = tag.globalName ? `${tag.globalName}: ${resolveTagValue(tag)}` : resolveTagValue(tag);
+                                                                                    return `${valueLabel}${unit}`;
+                                                                                })()}
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="point-tag-actions">
+                                                                        <button
+                                                                            className="btn ghost"
+                                                                            onClick={() => {
+                                                                                setEditingIndex(tag.originalIndex);
+                                                                                setEditName(tag.name);
+                                                                                setEditValue(tag.value);
+                                                                                setEditValueSource(tag.globalName ? "global" : "manual");
+                                                                                setEditGlobalName(tag.globalName || "");
+                                                                                setEditPointIndex(tag.index);
+                                                                            }}
+                                                                        >
+                                                                            Edit
+                                                                        </button>
+                                                                        {onRemoveTag && (
+                                                                            <button 
+                                                                                className="btn danger" 
+                                                                                onClick={() => onRemoveTag(tag.originalIndex)}
+                                                                            >
+                                                                                Delete
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                </>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        ) : (
+                                            <p className="helper-text">No tags for this point</p>
+                                        )}
+
+                                        {!isAddingTag && (
+                                            <button
+                                                className="btn primary"
+                                                onClick={() => {
+                                                    setNewTagName("");
+                                                    setNewTagValue("");
+                                                    setNewTagPointIndex("0");
+                                                    setNewTagValueSource("manual");
+                                                    setNewTagGlobalName("");
+                                                    setIsAddingTag(true);
+                                                    setAddTagPointIndex(-1);
+                                                }}
+                                                style={{width: '100%'}}
+                                            >
+                                                + Add Tag to Start Point
+                                            </button>
+                                        )}
+
+                                        {isAddingTag && addTagPointIndex === -1 && (
+                                            <div className="point-tag-item" style={{background: 'rgba(92, 210, 255, 0.08)', borderColor: 'rgba(92, 210, 255, 0.2)'}}>
+                                                <div className="field">
+                                                    <label>Tag Type</label>
+                                                    <select
+                                                        value={newTagName}
+                                                        onChange={(e) => {
+                                                            const selectedName = e.target.value;
+                                                            setNewTagName(selectedName);
+                                                            // Set default values based on tag type
+                                                            const template = TAG_TEMPLATES.find((entry) => entry.name === selectedName);
+                                                            if (template && template.defaultValue !== undefined) {
+                                                                setNewTagValue(template.defaultValue);
+                                                            } else {
+                                                                setNewTagValue("");
+                                                            }
+                                                        }}
+                                                        autoFocus
+                                                    >
+                                                        <option value="">-- Select Tag Type --</option>
+                                                        {TAG_TEMPLATES.map((template) => (
+                                                            <option key={template.name} value={template.name}>
+                                                                {template.name}{template.unit ? ` - ${template.unit}` : ""}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                <div className="field-grid">
+                                                    <div className="field">
+                                                        <label>Value</label>
+                                                        <input
+                                                            type="number"
+                                                            step="0.1"
+                                                            value={newTagValue}
+                                                            onChange={(e) => setNewTagValue(e.target.value)}
+                                                            placeholder="0"
+                                                            disabled={newTagValueSource === "global"}
+                                                        />
+                                                    </div>
+                                                    <div className="field">
+                                                        <label>Value source</label>
+                                                        <select
+                                                            value={newTagValueSource}
+                                                            onChange={(e) => setNewTagValueSource(e.target.value)}
+                                                        >
+                                                            <option value="manual">Manual</option>
+                                                            <option value="global" disabled={!globalVars?.length}>Global variable</option>
+                                                        </select>
+                                                    </div>
+                                                    {newTagValueSource === "global" && (
+                                                        <div className="field">
+                                                            <label>Global variable</label>
+                                                            <select
+                                                                value={newTagGlobalName}
+                                                                onChange={(e) => setNewTagGlobalName(e.target.value)}
+                                                            >
+                                                                <option value="">-- Select global --</option>
+                                                                {globalVars?.map((entry) => (
+                                                                    <option key={entry.name} value={entry.name}>
+                                                                        {entry.name}
+                                                                    </option>
+                                                                ))}
+                                                            </select>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <div className="point-tag-actions">
+                                                    <button
+                                                        className="btn primary"
+                                                        onClick={() => {
+                                                            if (newTagName.trim() && onAddTag) {
+                                                                const value = Number(newTagValue) || 0;
+                                                                const index = clampTagIndex(newTagPointIndex, 0);
+                                                                const globalName = newTagValueSource === "global" ? newTagGlobalName : undefined;
+                                                                if (newTagValueSource !== "global" || globalName) {
+                                                                    onAddTag(newTagName.trim(), value, index, globalName);
+                                                                }
+                                                                setNewTagName("");
+                                                                setNewTagValue("");
+                                                                setNewTagPointIndex("");
+                                                                setNewTagValueSource("manual");
+                                                                setNewTagGlobalName("");
+                                                                setIsAddingTag(false);
+                                                                setAddTagPointIndex(null);
+                                                            }
+                                                        }}
+                                                        disabled={!newTagName.trim() || (newTagValueSource === "global" && !newTagGlobalName)}
+                                                    >
+                                                        Add Tag
+                                                    </button>
+                                                    <button
+                                                        className="btn ghost"
+                                                        onClick={() => {
+                                                            setNewTagName("");
+                                                            setNewTagValue("");
+                                                            setNewTagPointIndex("");
+                                                            setNewTagValueSource("manual");
+                                                            setNewTagGlobalName("");
+                                                            setIsAddingTag(false);
+                                                            setAddTagPointIndex(null);
+                                                        }}
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {points.map((point, pointIndex) => {
                                 const pointTags = tagsByPoint[pointIndex] || [];
                                 const segment = segments?.[pointIndex];
                                 const typeLabel = segment?.type === "bezier" ? "Bezier" : segment?.type === "arc" ? "Arc" : "Line";
@@ -487,12 +871,12 @@ export default function RunPanel({
                                     tabIndex={0}
                                     aria-expanded={isExpanded}
                                         onClick={() => onTogglePointExpand?.(pointIndex)}
-                                    onKeyDown={(event) => {
-                                        if (event.key === "Enter" || event.key === " ") {
-                                            event.preventDefault();
-                                            onTogglePointExpand?.(pointIndex);
-                                        }
-                                    }}
+                                        onKeyDown={(event) => {
+                                            if (event.key === "Enter" || event.key === " ") {
+                                                event.preventDefault();
+                                                onTogglePointExpand?.(pointIndex);
+                                            }
+                                        }}
                                 >
                                     <div>
                                         <h4>Point {pointIndex + 1}{typeLabel ? ` - ${typeLabel}` : ""}</h4>
@@ -785,6 +1169,7 @@ export default function RunPanel({
                                                     setNewTagValueSource("manual");
                                                     setNewTagGlobalName("");
                                                     setIsAddingTag(true);
+                                                    setAddTagPointIndex(pointIndex);
                                                 }}
                                                 disabled={pointsCount === 0}
                                                 style={{width: '100%'}}
@@ -793,7 +1178,7 @@ export default function RunPanel({
                                             </button>
                                         )}
 
-                                        {isAddingTag && (
+                                        {isAddingTag && addTagPointIndex === pointIndex && (
                                             <div className="point-tag-item" style={{background: 'rgba(92, 210, 255, 0.08)', borderColor: 'rgba(92, 210, 255, 0.2)'}}>
                                                 <div className="field">
                                                     <label>Tag Type</label>
@@ -876,6 +1261,7 @@ export default function RunPanel({
                                                                 setNewTagValueSource("manual");
                                                                 setNewTagGlobalName("");
                                                                 setIsAddingTag(false);
+                                                                setAddTagPointIndex(null);
                                                             }
                                                         }}
                                                         disabled={!newTagName.trim() || (newTagValueSource === "global" && !newTagGlobalName)}
@@ -891,6 +1277,7 @@ export default function RunPanel({
                                                             setNewTagValueSource("manual");
                                                             setNewTagGlobalName("");
                                                             setIsAddingTag(false);
+                                                            setAddTagPointIndex(null);
                                                         }}
                                                     >
                                                         Cancel
@@ -904,8 +1291,7 @@ export default function RunPanel({
                                     </div>
                         );
                     })}
-                        </>
-                    )}
+                    </>
                 </section>
 
                 <section className="control-card">

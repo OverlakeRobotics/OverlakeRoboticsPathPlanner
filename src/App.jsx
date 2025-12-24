@@ -537,7 +537,9 @@ export default function App() {
     };
 
     const resolveSegmentEndIndex = (segmentIndex) => {
-        const idx = Math.max(1, Math.min(segmentEndIndices.length, Number(segmentIndex) || 0));
+        const parsed = Number(segmentIndex);
+        if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+        const idx = Math.min(segmentEndIndices.length, parsed);
         const endIndex = segmentEndIndices[idx - 1];
         return Number.isFinite(endIndex) ? endIndex + 1 : 0;
     };
@@ -695,6 +697,15 @@ export default function App() {
     }, [setSegments, headingMode, endHeadingValue, startPose]);
 
     // Point editing functions (segment endpoints)
+    const updateStartPose = useCallback((updates) => {
+        setStartPose((prev) => ({
+            ...prev,
+            x: updates.x !== undefined ? Number(updates.x) : prev.x,
+            y: updates.y !== undefined ? Number(updates.y) : prev.y,
+            h: updates.h !== undefined ? normDeg(Number(updates.h)) : prev.h,
+        }));
+    }, []);
+
     const updatePoint = (index, updates) => {
         setSegments((prev) => {
             const next = prev.map((segment) => ({...segment, end: {...segment.end}}));
@@ -842,6 +853,14 @@ export default function App() {
 
     const togglePointExpansion = (index) => {
         setExpandedPointIndex((prev) => {
+            if (index === null || index === undefined) {
+                setSelectedPointIndices([]);
+                return null;
+            }
+            if (index === -1) {
+                setSelectedPointIndices([]);
+                return prev === -1 ? null : -1;
+            }
             const next = prev === index ? null : index;
             setSelectedPointIndices(next === null ? [] : [index]);
             return next;
@@ -1424,6 +1443,8 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                 onTogglePointExpand={togglePointExpansion}
                 expandedPointIndex={expandedPointIndex}
                 onUpdatePoint={updatePoint}
+                startPose={startPose}
+                onUpdateStartPose={updateStartPose}
                 onUpdateSegmentControl={updateSegmentControl}
                 onUpdateSegmentMid={updateSegmentMid}
                 onUpdateSegmentHeadingMode={updateSegmentHeadingMode}
