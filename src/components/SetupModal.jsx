@@ -27,7 +27,7 @@ export default function SetupModal({ isOpen, onClose, onSave, initialSettings })
     
     // General Settings
     const [fieldSize, setFieldSize] = useState(FIELD_SIZE_IN);
-    const [showGrid, setShowGrid] = useState(false);
+    const [showGrid, setShowGrid] = useState(true);
     const [gridStepEntry, setGridStepEntry] = useState(String(GRID_DEFAULT_STEP));
     const [robotDimensions, setRobotDimensions] = useState({...DEFAULT_ROBOT_DIMENSIONS});
     
@@ -91,7 +91,7 @@ export default function SetupModal({ isOpen, onClose, onSave, initialSettings })
 
     const handleReset = () => {
         setFieldSize(FIELD_SIZE_IN);
-        setShowGrid(false);
+        setShowGrid(true);
         setGridStepEntry(String(GRID_DEFAULT_STEP));
         setRobotDimensions({...DEFAULT_ROBOT_DIMENSIONS});
         setPalette(DEFAULT_PALETTE);

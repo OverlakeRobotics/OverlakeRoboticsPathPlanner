@@ -75,7 +75,7 @@ export const drawPlannerScene = ({
     }
 
     if (showGrid && gridStep > 0) drawGrid(canvasCtx, gridStep, center, ppi, canvasSize, fieldSize);
-    drawPath(canvasCtx, startPose, pathPoints, center, ppi, palette);
+    drawPath(canvasCtx, startPose, pathPoints, center, ppi, palette, placeStart);
 
     overlayCtx.clearRect(0, 0, canvasSize, canvasSize);
     drawStartMarker(overlayCtx, startPose, center, ppi, placeStart, robot, palette);
@@ -164,20 +164,30 @@ const drawGrid = (ctx, step, center, ppi, canvasSize, fieldSize) => {
     ctx.restore();
 };
 
-const drawPath = (ctx, startPose, points, center, ppi, palette) => {
+const drawPath = (ctx, startPose, points, center, ppi, palette, placeStart) => {
     if (!points.length) return;
     ctx.save();
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
     ctx.strokeStyle = palette.path;
     ctx.lineWidth = 3;
-    const start = worldToCanvas(num(startPose.x), num(startPose.y), center.x, center.y, ppi);
     ctx.beginPath();
-    ctx.moveTo(start.cx, start.cy);
-    points.forEach((p) => {
-        const c = worldToCanvas(p.x, p.y, center.x, center.y, ppi);
-        ctx.lineTo(c.cx, c.cy);
-    });
+    if (placeStart) {
+        const first = points[0];
+        const start = worldToCanvas(first.x, first.y, center.x, center.y, ppi);
+        ctx.moveTo(start.cx, start.cy);
+        points.slice(1).forEach((p) => {
+            const c = worldToCanvas(p.x, p.y, center.x, center.y, ppi);
+            ctx.lineTo(c.cx, c.cy);
+        });
+    } else {
+        const start = worldToCanvas(num(startPose.x), num(startPose.y), center.x, center.y, ppi);
+        ctx.moveTo(start.cx, start.cy);
+        points.forEach((p) => {
+            const c = worldToCanvas(p.x, p.y, center.x, center.y, ppi);
+            ctx.lineTo(c.cx, c.cy);
+        });
+    }
     ctx.stroke();
     ctx.restore();
 };
@@ -272,7 +282,7 @@ const drawSegmentControls = (ctx, {segments, startPose, center, ppi, editMode, s
             if (segment.end) anchor = segment.end;
             return;
         }
-        const control = segment.type === "bezier" ? segment.control : segment.type === "arc" ? segment.mid : null;
+        const control = segment.type === "bezier" ? segment.control : null;
         const end = segment.end;
         if (control && end) {
             const anchorCanvas = worldToCanvas(anchor.x, anchor.y, center.x, center.y, ppi);
@@ -301,6 +311,24 @@ const drawSegmentControls = (ctx, {segments, startPose, center, ppi, editMode, s
     });
 };
 
+const drawPreviewControlLines = (ctx, {anchor, control, end, center, ppi}) => {
+    if (!anchor || !control || !end) return;
+    const anchorCanvas = worldToCanvas(anchor.x, anchor.y, center.x, center.y, ppi);
+    const controlCanvas = worldToCanvas(control.x, control.y, center.x, center.y, ppi);
+    const endCanvas = worldToCanvas(end.x, end.y, center.x, center.y, ppi);
+    ctx.save();
+    ctx.strokeStyle = "rgba(148, 163, 184, 0.7)";
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(anchorCanvas.cx, anchorCanvas.cy);
+    ctx.lineTo(controlCanvas.cx, controlCanvas.cy);
+    ctx.lineTo(endCanvas.cx, endCanvas.cy);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+};
+
 const drawPreview = (ctx, {
     preview,
     startPose,
@@ -323,6 +351,9 @@ const drawPreview = (ctx, {
 
     if (placeStart && preview) {
         const heading = num(preview.h ?? sh);
+        if (points.length) {
+            drawStartPreviewSegment(ctx, preview, points[0], center, ppi, palette);
+        }
         drawFootprint(ctx, preview.x, preview.y, heading, robot.length, robot.width, {
             fill: palette.start,
             stroke: "#ffc14b",
@@ -334,6 +365,21 @@ const drawPreview = (ctx, {
 
     if (shapeType === "bezier" && bezierTemp) {
         const control = bezierTemp.control;
+        if (preview) {
+            drawCurvedPreview(ctx, {
+                samples: sampleQuadraticBezier(anchor, bezierTemp.control, {x: preview.x, y: preview.y}),
+                anchor,
+                end: preview,
+                center,
+                ppi,
+                robot,
+                headingMode,
+                endHeading,
+                palette,
+            });
+            drawPreviewControlLines(ctx, {anchor, control, end: preview, center, ppi});
+        }
+
         const ctrlCanvas = worldToCanvas(control.x, control.y, center.x, center.y, ppi);
         ctx.save();
         ctx.fillStyle = "#bae6fd";
@@ -343,27 +389,27 @@ const drawPreview = (ctx, {
         ctx.fill();
         ctx.globalAlpha = 1;
         ctx.restore();
-
-        if (!preview) return;
-
-        drawCurvedPreview(ctx, {
-            samples: sampleQuadraticBezier(anchor, bezierTemp.control, {x: preview.x, y: preview.y}),
-            anchor,
-            end: preview,
-            center,
-            ppi,
-            robot,
-            headingMode,
-            endHeading,
-            palette,
-        });
         return;
     }
 
-    if (shapeType === "arc" && arcTemp) {
-        const midpoint = arcTemp.mid;
-        const midCanvas = worldToCanvas(midpoint.x, midpoint.y, center.x, center.y, ppi);
-        ctx.save();
+        if (shapeType === "arc" && arcTemp) {
+            const midpoint = arcTemp.mid;
+            if (preview) {
+                drawCurvedPreview(ctx, {
+                    samples: sampleCircularArcThrough(anchor, arcTemp.mid, {x: preview.x, y: preview.y}),
+                    anchor,
+                end: preview,
+                center,
+                ppi,
+                robot,
+                headingMode,
+                    endHeading,
+                    palette,
+                });
+            }
+
+            const midCanvas = worldToCanvas(midpoint.x, midpoint.y, center.x, center.y, ppi);
+            ctx.save();
         ctx.fillStyle = "#bae6fd";
         ctx.globalAlpha = 0.9;
         ctx.beginPath();
@@ -371,20 +417,6 @@ const drawPreview = (ctx, {
         ctx.fill();
         ctx.globalAlpha = 1;
         ctx.restore();
-
-        if (!preview) return;
-
-        drawCurvedPreview(ctx, {
-            samples: sampleCircularArcThrough(anchor, arcTemp.mid, {x: preview.x, y: preview.y}),
-            anchor,
-            end: preview,
-            center,
-            ppi,
-            robot,
-            headingMode,
-            endHeading,
-            palette,
-        });
         return;
     }
 
@@ -402,6 +434,21 @@ const drawPreviewMarker = (ctx, preview, center, ppi, color, heading) => {
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(pos.cx, pos.cy, 6, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+};
+
+const drawStartPreviewSegment = (ctx, preview, firstPoint, center, ppi, palette) => {
+    if (!firstPoint) return;
+    ctx.save();
+    ctx.setLineDash([8, 6]);
+    ctx.strokeStyle = palette.preview ?? "#94a3b8";
+    ctx.lineWidth = 2;
+    const start = worldToCanvas(preview.x, preview.y, center.x, center.y, ppi);
+    const end = worldToCanvas(firstPoint.x, firstPoint.y, center.x, center.y, ppi);
+    ctx.beginPath();
+    ctx.moveTo(start.cx, start.cy);
+    ctx.lineTo(end.cx, end.cy);
     ctx.stroke();
     ctx.restore();
 };
@@ -737,6 +784,8 @@ export const createCanvasInteraction = ({
     segments,
     onUpdateSegmentControl,
     onUpdateSegmentMid,
+    onBeginEditAction,
+    onEndEditAction,
     fieldSize,
     zoom,
     setMarquee,
@@ -760,6 +809,17 @@ export const createCanvasInteraction = ({
         return {cx, cy};
     };
 
+    const uniqueIndices = (indices) => {
+        const seen = new Set();
+        const result = [];
+        (indices || []).forEach((index) => {
+            if (!Number.isFinite(index) || seen.has(index)) return;
+            seen.add(index);
+            result.push(index);
+        });
+        return result;
+    };
+
     const ensureDrawState = () => {
         if (!drawStateRef) return null;
         if (!drawStateRef.current) {
@@ -773,6 +833,8 @@ export const createCanvasInteraction = ({
                 pointerTarget: null,
                 dragging: false,
                 dragPointIndex: null,
+                dragSelection: null,
+                dragMoved: false,
             };
         }
         if (!drawStateRef.current.raw) drawStateRef.current.raw = [];
@@ -785,6 +847,10 @@ export const createCanvasInteraction = ({
         if (!drawStateRef.current.pointerTarget) drawStateRef.current.pointerTarget = null;
         if (typeof drawStateRef.current.dragging !== "boolean") drawStateRef.current.dragging = false;
         if (typeof drawStateRef.current.dragPointIndex !== "number") drawStateRef.current.dragPointIndex = null;
+        if (drawStateRef.current.dragSelection !== null && !Array.isArray(drawStateRef.current.dragSelection)) {
+            drawStateRef.current.dragSelection = null;
+        }
+        if (typeof drawStateRef.current.dragMoved !== "boolean") drawStateRef.current.dragMoved = false;
         if (!drawStateRef.current.draggingControl) drawStateRef.current.draggingControl = null;
         return drawStateRef.current;
     };
@@ -913,6 +979,8 @@ export const createCanvasInteraction = ({
         state.candidates = [];
         state.selectedIndex = undefined;
         state.cursorWorld = null;
+        state.dragSelection = null;
+        state.dragMoved = false;
     };
 
     const appendFreehandStroke = (rawCopy) => {
@@ -1064,6 +1132,7 @@ export const createCanvasInteraction = ({
                 if (type === "bezier" || type === "arc") {
                     const state = ensureDrawState();
                     state.draggingControl = {index: hitIndex, type};
+                    state.dragMoved = false;
                     if (setSelectedPointIndices) setSelectedPointIndices([hitIndex]);
                     if (typeof event.pointerId === "number") {
                         try {
@@ -1083,6 +1152,7 @@ export const createCanvasInteraction = ({
             const world = pointerToWorld(event.clientX, event.clientY, rect);
             const canvasPos = pointerToCanvas(event.clientX, event.clientY, rect);
             const clickRadius = 15 / ppi;
+            const currentSelection = Array.isArray(selectedPointIndices) ? selectedPointIndices : [];
 
             // Find ALL points within click radius (for stacked points)
             const nearbyPoints = [];
@@ -1099,8 +1169,8 @@ export const createCanvasInteraction = ({
 
             // Check if clicked inside any selected point's footprint
             let clickedOnSelectedFootprint = false;
-            if (selectedPointIndices && selectedPointIndices.length > 0 && robot) {
-                for (const index of selectedPointIndices) {
+            if (currentSelection.length > 0 && robot) {
+                for (const index of currentSelection) {
                     const p = points[index];
                     if (!p) continue;
                     
@@ -1126,7 +1196,9 @@ export const createCanvasInteraction = ({
                     // Drag selection via footprint
                     const state = ensureDrawState();
                     state.dragging = true;
-                    state.dragPointIndex = selectedPointIndices[0]; // Use first selected point as reference
+                    state.dragPointIndex = currentSelection[0]; // Use first selected point as reference
+                    state.dragSelection = currentSelection.length ? [...currentSelection] : null;
+                    state.dragMoved = false;
                     state.dragStartWorld = snapToField(world.x, world.y, snapStep(), fieldSize);
                     
                     if (typeof event.pointerId === "number") {
@@ -1165,21 +1237,32 @@ export const createCanvasInteraction = ({
             if (nearbyPoints.length > 1) {
                 const state = ensureDrawState();
                 state.dragging = true;
-                state.dragPointIndex = nearbyPoints[0].index;
                 state.dragStartWorld = snapToField(world.x, world.y, snapStep(), fieldSize);
+                state.dragMoved = false;
                 
-                // Select all stacked points
+                // Select all stacked points unless a prior selection already includes some.
                 const stackedIndices = nearbyPoints.map(p => p.index);
+                const hasSelectedStacked = stackedIndices.some((index) => currentSelection.includes(index));
+                let nextSelection = stackedIndices;
+
                 if (event.ctrlKey || event.metaKey) {
                     // Add to existing selection
-                    setSelectedPointIndices(prev => [...new Set([...prev, ...stackedIndices])]);
-                } else if (event.shiftKey && selectedPointIndices.length > 0) {
+                    nextSelection = uniqueIndices([...currentSelection, ...stackedIndices]);
+                    setSelectedPointIndices(nextSelection);
+                } else if (event.shiftKey && currentSelection.length > 0) {
                     // Range select from last selected to all stacked
-                    setSelectedPointIndices(prev => [...new Set([...prev, ...stackedIndices])]);
+                    nextSelection = uniqueIndices([...currentSelection, ...stackedIndices]);
+                    setSelectedPointIndices(nextSelection);
+                } else if (hasSelectedStacked) {
+                    nextSelection = currentSelection;
                 } else {
                     // Replace selection with all stacked points
-                    setSelectedPointIndices(stackedIndices);
+                    nextSelection = stackedIndices;
+                    setSelectedPointIndices(nextSelection);
                 }
+
+                state.dragPointIndex = stackedIndices.find((index) => nextSelection.includes(index)) ?? stackedIndices[0];
+                state.dragSelection = nextSelection.length ? [...nextSelection] : null;
                 
                 if (typeof event.pointerId === "number") {
                     try {
@@ -1196,30 +1279,35 @@ export const createCanvasInteraction = ({
             const state = ensureDrawState();
             state.dragging = true;
             state.dragPointIndex = closestIndex;
+            state.dragMoved = false;
             state.dragStartWorld = snapToField(world.x, world.y, snapStep(), fieldSize);
             
             // Handle selection
+            let nextSelection = currentSelection;
             if (event.ctrlKey || event.metaKey) {
                 // Toggle selection with Ctrl/Cmd click
-                setSelectedPointIndices(prev => {
-                    if (prev.includes(closestIndex)) {
-                        return prev.filter(i => i !== closestIndex);
-                    }
-                    return [...prev, closestIndex];
-                });
-            } else if (event.shiftKey && selectedPointIndices.length > 0) {
+                if (currentSelection.includes(closestIndex)) {
+                    nextSelection = currentSelection.filter(i => i !== closestIndex);
+                } else {
+                    nextSelection = [...currentSelection, closestIndex];
+                }
+                setSelectedPointIndices(nextSelection);
+            } else if (event.shiftKey && currentSelection.length > 0) {
                 // Range selection with Shift click
-                const lastSelected = selectedPointIndices[selectedPointIndices.length - 1];
+                const lastSelected = currentSelection[currentSelection.length - 1];
                 const start = Math.min(lastSelected, closestIndex);
                 const end = Math.max(lastSelected, closestIndex);
                 const range = [];
                 for (let i = start; i <= end; i++) range.push(i);
-                setSelectedPointIndices(prev => [...new Set([...prev, ...range])]);
-            } else if (!selectedPointIndices.includes(closestIndex)) {
+                nextSelection = uniqueIndices([...currentSelection, ...range]);
+                setSelectedPointIndices(nextSelection);
+            } else if (!currentSelection.includes(closestIndex)) {
                 // Single selection
-                setSelectedPointIndices([closestIndex]);
+                nextSelection = [closestIndex];
+                setSelectedPointIndices(nextSelection);
             }
             // If already selected, keep selection for group drag
+            state.dragSelection = nextSelection.length ? [...nextSelection] : null;
             
             if (typeof event.pointerId === "number") {
                 try {
@@ -1240,6 +1328,10 @@ export const createCanvasInteraction = ({
         const state = drawStateRef?.current;
 
         if (state?.draggingControl && editMode) {
+            if (!state.dragMoved) {
+                onBeginEditAction?.();
+                state.dragMoved = true;
+            }
             const world = pointerToWorld(event.clientX, event.clientY, rect);
             const snapped = snapToField(world.x, world.y, snapStep(), fieldSize);
             if (state.draggingControl.type === "bezier") {
@@ -1263,16 +1355,21 @@ export const createCanvasInteraction = ({
 
         // Handle point dragging in edit mode (multi-selection aware)
         if (state?.dragging && state.dragPointIndex !== null) {
+            if (!state.dragMoved) {
+                onBeginEditAction?.();
+                state.dragMoved = true;
+            }
             const world = pointerToWorld(event.clientX, event.clientY, rect);
             const snapped = snapToField(world.x, world.y, snapStep(), fieldSize);
             
             // If multiple points selected and dragging one of them, move all
-            if (selectedPointIndices && selectedPointIndices.length > 1 && selectedPointIndices.includes(state.dragPointIndex)) {
+            const dragSelection = Array.isArray(state.dragSelection) ? state.dragSelection : selectedPointIndices;
+            if (dragSelection && dragSelection.length > 1 && dragSelection.includes(state.dragPointIndex)) {
                 if (state.dragStartWorld && updatePoints) {
                     const deltaX = snapped.x - state.dragStartWorld.x;
                     const deltaY = snapped.y - state.dragStartWorld.y;
                     // Update all selected points
-                    updatePoints(selectedPointIndices, deltaX, deltaY);
+                    updatePoints(dragSelection, deltaX, deltaY);
                     state.dragStartWorld = snapped;
                 }
             } else if (updatePoint) {
@@ -1294,7 +1391,9 @@ export const createCanvasInteraction = ({
         const state = drawStateRef?.current;
 
         if (state?.draggingControl) {
+            if (state.dragMoved) onEndEditAction?.();
             state.draggingControl = null;
+            state.dragMoved = false;
             if (state.pointerId !== null && state.pointerTarget) {
                 try {
                     state.pointerTarget.releasePointerCapture(state.pointerId);
@@ -1356,9 +1455,12 @@ export const createCanvasInteraction = ({
 
         // Stop dragging in edit mode
         if (state?.dragging) {
+            if (state.dragMoved) onEndEditAction?.();
             state.dragging = false;
             state.dragPointIndex = null;
             state.dragStartWorld = null;
+            state.dragMoved = false;
+            state.dragSelection = null;
             if (state.pointerId !== null && state.pointerTarget) {
                 try {
                     state.pointerTarget.releasePointerCapture(state.pointerId);
@@ -1404,6 +1506,17 @@ export const createCanvasInteraction = ({
     };
 
     const onPointerCancel = () => {
+        const state = drawStateRef?.current;
+        if (state?.dragging || state?.draggingControl) {
+            if (state.dragMoved) onEndEditAction?.();
+            state.dragging = false;
+            state.draggingControl = null;
+            state.dragPointIndex = null;
+            state.dragStartWorld = null;
+            state.dragSelection = null;
+            state.dragMoved = false;
+            releasePointerCapture(state);
+        }
         cancelDraw();
     };
 
@@ -1429,7 +1542,9 @@ export const createCanvasInteraction = ({
             setPlaceStart(false);
             return;
         }
-        if (!bezierTemp && !arcTemp) setPreview(null);
+        if (!bezierTemp && !arcTemp && shapeType !== "bezier" && shapeType !== "arc") {
+            setPreview(null);
+        }
         if (bezierTemp) {
             if (appendPoints.bezier) {
                 appendPoints.bezier(bezierTemp.control, {x: snapped.x, y: snapped.y});
@@ -1526,4 +1641,3 @@ export const createSnapStep = (value) => () => {
     const parsed = parseFloat(value);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 };
-

@@ -315,8 +315,22 @@ textarea.code-box {
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
 }
 
+.field-grid .grid-action {
+  align-self: end;
+  justify-self: start;
+  height: fit-content;
+}
+
 .field-grid.three {
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+
+.field-grid.tag-add-fields {
+  grid-template-columns: 1fr;
+}
+
+.field-grid.point-coordinates {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .helper-text {
@@ -1043,6 +1057,28 @@ textarea.code-box::-webkit-scrollbar-thumb:hover {
   gap: 10px;
 }
 
+.globals-card {
+  display: grid;
+  gap: 12px;
+}
+
+.global-vars-list {
+  display: grid;
+  gap: 12px;
+}
+
+.point-tag-item.global-var-item {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(80px, 120px) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+}
+
+.point-tag-item.global-var-item .global-var-input {
+  width: 100%;
+}
+
 @keyframes slideIn {
   from {
     opacity: 0;
@@ -1112,6 +1148,18 @@ textarea.code-box::-webkit-scrollbar-thumb:hover {
   flex-shrink: 0;
   transition: color 150ms ease, transform 150ms ease;
   opacity: 0.6;
+}
+
+.point-tag-header .drag-handle {
+  position: static;
+  top: auto;
+  right: auto;
+  width: auto;
+  height: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  letter-spacing: 0;
 }
 
 .point-tag-item:hover .drag-handle {

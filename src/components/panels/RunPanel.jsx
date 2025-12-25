@@ -89,6 +89,8 @@ export default function RunPanel({
     const [draggedIndex, setDraggedIndex] = useState(null);
     const [dragOverIndex, setDragOverIndex] = useState(null);
     const [draggedPointIndex, setDraggedPointIndex] = useState(null);
+    const draggedTagIndexRef = useRef(null);
+    const draggedTagPointIndexRef = useRef(null);
     // Selected op mode must be chosen before initializing the robot
     const [selectedOpMode, setSelectedOpMode] = useState("");
 
@@ -156,6 +158,46 @@ export default function RunPanel({
             pointDragGhostRef.current.remove();
             pointDragGhostRef.current = null;
         }
+    };
+
+    const clearTagDragState = () => {
+        draggedTagIndexRef.current = null;
+        draggedTagPointIndexRef.current = null;
+        setDraggedIndex(null);
+        setDragOverIndex(null);
+    };
+
+    const handleTagDragStart = (event, tagIndex, pointIndex) => {
+        event.stopPropagation();
+        if (!event.dataTransfer) return;
+        draggedTagIndexRef.current = tagIndex;
+        draggedTagPointIndexRef.current = pointIndex;
+        setDraggedIndex(tagIndex);
+        setDragOverIndex(null);
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", String(tagIndex));
+    };
+
+    const handleTagDragOver = (event, tagIndex, pointIndex) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+        const fromIndex = draggedTagIndexRef.current;
+        if (fromIndex === null || draggedTagPointIndexRef.current !== pointIndex) return;
+        if (fromIndex === tagIndex) return;
+        if (dragOverIndex !== tagIndex) setDragOverIndex(tagIndex);
+        if (!onReorderTags) return;
+
+        const rect = event.currentTarget.getBoundingClientRect();
+        const before = event.clientY < rect.top + rect.height / 2;
+        const insertIndex = before
+            ? (fromIndex < tagIndex ? tagIndex - 1 : tagIndex)
+            : (fromIndex < tagIndex ? tagIndex : tagIndex + 1);
+
+        if (insertIndex === fromIndex) return;
+        onReorderTags(fromIndex, insertIndex);
+        draggedTagIndexRef.current = insertIndex;
+        setDraggedIndex(insertIndex);
     };
     // Group tags by point index
     const tagsByPoint = tags.reduce((acc, tag, index) => {
@@ -512,7 +554,7 @@ export default function RunPanel({
                                     className={`point-tags-shell${expandedPointIndex === -1 ? " open" : ""}${closingPointIndex === -1 ? " closing" : ""}`}
                                 >
                                     <div className="point-tags-content">
-                                        <div className="field-grid">
+                                        <div className="field-grid point-coordinates">
                                             <div className="field">
                                                 <label>X (in)</label>
                                                 <NumberField
@@ -549,81 +591,64 @@ export default function RunPanel({
                                                             className={`point-tag-item ${draggedIndex === tag.originalIndex ? 'dragging' : ''} ${dragOverIndex === tag.originalIndex ? 'drag-over' : ''}`}
                                                             draggable={!isEditing}
                                                             onDragStart={(e) => {
-                                                                if (!isEditing) {
-                                                                    setDraggedIndex(tag.originalIndex);
-                                                                    e.dataTransfer.effectAllowed = 'move';
-                                                                    e.dataTransfer.setData('text/plain', tag.originalIndex.toString());
-                                                                }
+                                                                if (!isEditing) handleTagDragStart(e, tag.originalIndex, -1);
                                                             }}
                                                             onDragEnter={(e) => {
                                                                 e.preventDefault();
-                                                                if (draggedIndex !== null && draggedIndex !== tag.originalIndex) {
-                                                                    setDragOverIndex(tag.originalIndex);
-                                                                }
+                                                                e.stopPropagation();
                                                             }}
                                                             onDragLeave={(e) => {
                                                                 e.preventDefault();
+                                                                e.stopPropagation();
                                                                 if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget)) {
                                                                     setDragOverIndex(null);
                                                                 }
                                                             }}
-                                                            onDragOver={(e) => {
-                                                                e.preventDefault();
-                                                                e.dataTransfer.dropEffect = 'move';
-                                                            }}
+                                                            onDragOver={(e) => handleTagDragOver(e, tag.originalIndex, -1)}
                                                             onDrop={(e) => {
                                                                 e.preventDefault();
                                                                 e.stopPropagation();
-                                                                if (draggedIndex !== null && draggedIndex !== tag.originalIndex && onReorderTags) {
-                                                                    onReorderTags(draggedIndex, tag.originalIndex);
-                                                                }
-                                                                setDraggedIndex(null);
-                                                                setDragOverIndex(null);
+                                                                clearTagDragState();
                                                             }}
-                                                            onDragEnd={() => {
-                                                                setDraggedIndex(null);
-                                                                setDragOverIndex(null);
+                                                            onDragEnd={(e) => {
+                                                                e.stopPropagation();
+                                                                clearTagDragState();
                                                             }}
                                                         >
                                                             {isEditing ? (
                                                                 <>
-                                                                    <div className="field">
-                                                                        <label>Tag</label>
-                                                                        <select
-                                                                            value={editName}
-                                                                            onChange={(e) => setEditName(e.target.value)}
-                                                                        >
-                                                                            <option value="">-- Select Tag Type --</option>
-                                                                            {TAG_TEMPLATES.map((template) => (
-                                                                                <option key={template.name} value={template.name}>
-                                                                                    {template.name}{template.unit ? ` - ${template.unit}` : ""}
-                                                                                </option>
-                                                                            ))}
-                                                                        </select>
-                                                                    </div>
-                                                                    <div className="field-grid">
+                                                                    <div className="field-grid tag-add-fields">
                                                                         <div className="field">
-                                                                            <label>Value</label>
-                                                                            <input
-                                                                                type="number"
-                                                                                value={editValue}
-                                                                                onChange={(e) => setEditValue(Number(e.target.value))}
-                                                                                disabled={editValueSource === "global"}
-                                                                            />
+                                                                            <label>Tag Type</label>
+                                                                            <select
+                                                                                value={editName}
+                                                                                onChange={(e) => setEditName(e.target.value)}
+                                                                            >
+                                                                                <option value="">-- Select Tag Type --</option>
+                                                                                {TAG_TEMPLATES.map((template) => (
+                                                                                    <option key={template.name} value={template.name}>
+                                                                                        {template.name}{template.unit ? ` - ${template.unit}` : ""}
+                                                                                    </option>
+                                                                                ))}
+                                                                            </select>
                                                                         </div>
                                                                         <div className="field">
                                                                             <label>Value source</label>
                                                                             <select
                                                                                 value={editValueSource}
-                                                                                onChange={(e) => setEditValueSource(e.target.value)}
+                                                                                onChange={(e) => {
+                                                                                    const source = e.target.value;
+                                                                                    setEditValueSource(source);
+                                                                                    if (source !== "global") setEditGlobalName("");
+                                                                                }}
                                                                             >
                                                                                 <option value="manual">Manual</option>
                                                                                 <option value="global" disabled={!globalVars?.length}>Global variable</option>
                                                                             </select>
                                                                         </div>
-                                                                        {editValueSource === "global" && (
-                                                                            <div className="field">
-                                                                                <label>Global variable</label>
+                                                                        <div className="field">
+                                                                            <label>{editValueSource === "global" ? "Global variable" : "Value"}</label>
+                                                                            {editValueSource === "global" ? (
                                                                                 <select
                                                                                     value={editGlobalName}
                                                                                     onChange={(e) => setEditGlobalName(e.target.value)}
@@ -635,8 +660,14 @@ export default function RunPanel({
                                                                                         </option>
                                                                                     ))}
                                                                                 </select>
-                                                                            </div>
-                                                                        )}
+                                                                            ) : (
+                                                                                <input
+                                                                                    type="number"
+                                                                                    value={editValue}
+                                                                                    onChange={(e) => setEditValue(Number(e.target.value))}
+                                                                                />
+                                                                            )}
+                                                                        </div>
                                                                     </div>
                                                                     <div className="point-tag-actions">
                                                                         <button
@@ -731,56 +762,49 @@ export default function RunPanel({
 
                                         {isAddingTag && addTagPointIndex === -1 && (
                                             <div className="point-tag-item" style={{background: 'rgba(92, 210, 255, 0.08)', borderColor: 'rgba(92, 210, 255, 0.2)'}}>
-                                                <div className="field">
-                                                    <label>Tag Type</label>
-                                                    <select
-                                                        value={newTagName}
-                                                        onChange={(e) => {
-                                                            const selectedName = e.target.value;
-                                                            setNewTagName(selectedName);
-                                                            // Set default values based on tag type
-                                                            const template = TAG_TEMPLATES.find((entry) => entry.name === selectedName);
-                                                            if (template && template.defaultValue !== undefined) {
-                                                                setNewTagValue(template.defaultValue);
-                                                            } else {
-                                                                setNewTagValue("");
-                                                            }
-                                                        }}
-                                                        autoFocus
-                                                    >
-                                                        <option value="">-- Select Tag Type --</option>
-                                                        {TAG_TEMPLATES.map((template) => (
-                                                            <option key={template.name} value={template.name}>
-                                                                {template.name}{template.unit ? ` - ${template.unit}` : ""}
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                </div>
-                                                <div className="field-grid">
+                                                <div className="field-grid tag-add-fields">
                                                     <div className="field">
-                                                        <label>Value</label>
-                                                        <input
-                                                            type="number"
-                                                            step="0.1"
-                                                            value={newTagValue}
-                                                            onChange={(e) => setNewTagValue(e.target.value)}
-                                                            placeholder="0"
-                                                            disabled={newTagValueSource === "global"}
-                                                        />
+                                                        <label>Tag Type</label>
+                                                        <select
+                                                            value={newTagName}
+                                                            onChange={(e) => {
+                                                                const selectedName = e.target.value;
+                                                                setNewTagName(selectedName);
+                                                                // Set default values based on tag type
+                                                                const template = TAG_TEMPLATES.find((entry) => entry.name === selectedName);
+                                                                if (template && template.defaultValue !== undefined) {
+                                                                    setNewTagValue(template.defaultValue);
+                                                                } else {
+                                                                    setNewTagValue("");
+                                                                }
+                                                            }}
+                                                            autoFocus
+                                                        >
+                                                            <option value="">-- Select Tag Type --</option>
+                                                            {TAG_TEMPLATES.map((template) => (
+                                                                <option key={template.name} value={template.name}>
+                                                                    {template.name}{template.unit ? ` - ${template.unit}` : ""}
+                                                                </option>
+                                                            ))}
+                                                        </select>
                                                     </div>
                                                     <div className="field">
                                                         <label>Value source</label>
                                                         <select
                                                             value={newTagValueSource}
-                                                            onChange={(e) => setNewTagValueSource(e.target.value)}
+                                                            onChange={(e) => {
+                                                                const source = e.target.value;
+                                                                setNewTagValueSource(source);
+                                                                if (source !== "global") setNewTagGlobalName("");
+                                                            }}
                                                         >
                                                             <option value="manual">Manual</option>
                                                             <option value="global" disabled={!globalVars?.length}>Global variable</option>
                                                         </select>
                                                     </div>
-                                                    {newTagValueSource === "global" && (
-                                                        <div className="field">
-                                                            <label>Global variable</label>
+                                                    <div className="field">
+                                                        <label>{newTagValueSource === "global" ? "Global variable" : "Value"}</label>
+                                                        {newTagValueSource === "global" ? (
                                                             <select
                                                                 value={newTagGlobalName}
                                                                 onChange={(e) => setNewTagGlobalName(e.target.value)}
@@ -792,8 +816,16 @@ export default function RunPanel({
                                                                     </option>
                                                                 ))}
                                                             </select>
-                                                        </div>
-                                                    )}
+                                                        ) : (
+                                                            <input
+                                                                type="number"
+                                                                step="0.1"
+                                                                value={newTagValue}
+                                                                onChange={(e) => setNewTagValue(e.target.value)}
+                                                                placeholder="0"
+                                                            />
+                                                        )}
+                                                    </div>
                                                 </div>
                                                 <div className="point-tag-actions">
                                                     <button
@@ -847,6 +879,9 @@ export default function RunPanel({
                                 const typeLabel = segment?.type === "bezier" ? "Bezier" : segment?.type === "arc" ? "Arc" : "Line";
                                 const isExpanded = expandedPointIndex === pointIndex;
                                 const isClosing = closingPointIndex === pointIndex;
+                                const isCurvedSegment = segment?.type === "bezier" || segment?.type === "arc";
+                                const headingMode = segment?.headingMode || "straight";
+                                const showHeadingInput = !isCurvedSegment || headingMode === "straight";
 
                                 return (
                                     <div
@@ -893,7 +928,7 @@ export default function RunPanel({
                                                 className={`point-tags-shell${isExpanded ? " open" : ""}${isClosing ? " closing" : ""}`}
                                             >
                                                 <div className="point-tags-content">
-                                                <div className="field-grid">
+                                                <div className="field-grid point-coordinates">
                                                     <div className="field">
                                                         <label>X (in)</label>
                                                         <NumberField
@@ -910,32 +945,7 @@ export default function RunPanel({
                                                             onCommit={(value) => onUpdatePoint?.(pointIndex, { y: value })}
                                                         />
                                                     </div>
-                                                    {segment?.type === "bezier" || segment?.type === "arc" ? (
-                                                        <>
-                                                            <div className="field">
-                                                                <label>Heading strategy</label>
-                                                                <select
-                                                                    value={segment.headingMode || "straight"}
-                                                                    onChange={(e) => onUpdateSegmentHeadingMode?.(pointIndex, e.target.value)}
-                                                                >
-                                                                    <option value="straight">Straight</option>
-                                                                    <option value="tangent">Tangent</option>
-                                                                    <option value="orth-left">Orthogonal L</option>
-                                                                    <option value="orth-right">Orthogonal R</option>
-                                                                </select>
-                                                            </div>
-                                                            {(segment.headingMode || "straight") === "straight" && (
-                                                                <div className="field">
-                                                                    <label>Heading (deg)</label>
-                                                                    <NumberField
-                                                                value={point.h ?? 0}
-                                                                step="1"
-                                                                onCommit={(value) => onUpdatePoint?.(pointIndex, { h: value })}
-                                                            />
-                                                                </div>
-                                                            )}
-                                                        </>
-                                                    ) : (
+                                                    {showHeadingInput && (
                                                         <div className="field">
                                                             <label>Heading (deg)</label>
                                                             <NumberField
@@ -946,6 +956,22 @@ export default function RunPanel({
                                                         </div>
                                                     )}
                                                 </div>
+                                                {isCurvedSegment && (
+                                                    <div className="field-grid">
+                                                        <div className="field">
+                                                            <label>Heading strategy</label>
+                                                            <select
+                                                                value={headingMode}
+                                                                onChange={(e) => onUpdateSegmentHeadingMode?.(pointIndex, e.target.value)}
+                                                            >
+                                                                <option value="straight">Straight</option>
+                                                                <option value="tangent">Tangent</option>
+                                                                <option value="orth-left">Orthogonal L</option>
+                                                                <option value="orth-right">Orthogonal R</option>
+                                                            </select>
+                                                        </div>
+                                                    </div>
+                                                )}
                                                 {segment?.type === "bezier" && (
                                                     <div className="field-grid" style={{marginTop: "10px"}}>
                                                         <div className="field">
@@ -997,81 +1023,64 @@ export default function RunPanel({
                                                             className={`point-tag-item ${draggedIndex === tag.originalIndex ? 'dragging' : ''} ${dragOverIndex === tag.originalIndex ? 'drag-over' : ''}`}
                                                             draggable={!isEditing}
                                                             onDragStart={(e) => {
-                                                                if (!isEditing) {
-                                                                    setDraggedIndex(tag.originalIndex);
-                                                                    e.dataTransfer.effectAllowed = 'move';
-                                                                    e.dataTransfer.setData('text/plain', tag.originalIndex.toString());
-                                                                }
+                                                                if (!isEditing) handleTagDragStart(e, tag.originalIndex, pointIndex);
                                                             }}
                                                             onDragEnter={(e) => {
                                                                 e.preventDefault();
-                                                                if (draggedIndex !== null && draggedIndex !== tag.originalIndex) {
-                                                                    setDragOverIndex(tag.originalIndex);
-                                                                }
+                                                                e.stopPropagation();
                                                             }}
                                                             onDragLeave={(e) => {
                                                                 e.preventDefault();
+                                                                e.stopPropagation();
                                                                 if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget)) {
                                                                     setDragOverIndex(null);
                                                                 }
                                                             }}
-                                                            onDragOver={(e) => {
-                                                                e.preventDefault();
-                                                                e.dataTransfer.dropEffect = 'move';
-                                                            }}
+                                                            onDragOver={(e) => handleTagDragOver(e, tag.originalIndex, pointIndex)}
                                                             onDrop={(e) => {
                                                                 e.preventDefault();
                                                                 e.stopPropagation();
-                                                                if (draggedIndex !== null && draggedIndex !== tag.originalIndex && onReorderTags) {
-                                                                    onReorderTags(draggedIndex, tag.originalIndex);
-                                                                }
-                                                                setDraggedIndex(null);
-                                                                setDragOverIndex(null);
+                                                                clearTagDragState();
                                                             }}
-                                                            onDragEnd={() => {
-                                                                setDraggedIndex(null);
-                                                                setDragOverIndex(null);
+                                                            onDragEnd={(e) => {
+                                                                e.stopPropagation();
+                                                                clearTagDragState();
                                                             }}
                                                         >
                                                             {isEditing ? (
                                                                 <>
-                                                                    <div className="field">
-                                                                        <label>Tag</label>
-                                                                        <select
-                                                                            value={editName}
-                                                                            onChange={(e) => setEditName(e.target.value)}
-                                                                        >
-                                                                            <option value="">-- Select Tag Type --</option>
-                                                                            {TAG_TEMPLATES.map((template) => (
-                                                                                <option key={template.name} value={template.name}>
-                                                                                    {template.name}{template.unit ? ` - ${template.unit}` : ""}
-                                                                                </option>
-                                                                            ))}
-                                                                        </select>
-                                                                    </div>
-                                                                    <div className="field-grid">
+                                                                    <div className="field-grid tag-add-fields">
                                                                         <div className="field">
-                                                                            <label>Value</label>
-                                                                            <input
-                                                                                type="number"
-                                                                                value={editValue}
-                                                                                onChange={(e) => setEditValue(Number(e.target.value))}
-                                                                                disabled={editValueSource === "global"}
-                                                                            />
+                                                                            <label>Tag Type</label>
+                                                                            <select
+                                                                                value={editName}
+                                                                                onChange={(e) => setEditName(e.target.value)}
+                                                                            >
+                                                                                <option value="">-- Select Tag Type --</option>
+                                                                                {TAG_TEMPLATES.map((template) => (
+                                                                                    <option key={template.name} value={template.name}>
+                                                                                        {template.name}{template.unit ? ` - ${template.unit}` : ""}
+                                                                                    </option>
+                                                                                ))}
+                                                                            </select>
                                                                         </div>
                                                                         <div className="field">
                                                                             <label>Value source</label>
                                                                             <select
                                                                                 value={editValueSource}
-                                                                                onChange={(e) => setEditValueSource(e.target.value)}
+                                                                                onChange={(e) => {
+                                                                                    const source = e.target.value;
+                                                                                    setEditValueSource(source);
+                                                                                    if (source !== "global") setEditGlobalName("");
+                                                                                }}
                                                                             >
                                                                                 <option value="manual">Manual</option>
                                                                                 <option value="global" disabled={!globalVars?.length}>Global variable</option>
                                                                             </select>
                                                                         </div>
-                                                                        {editValueSource === "global" && (
-                                                                            <div className="field">
-                                                                                <label>Global variable</label>
+                                                                        <div className="field">
+                                                                            <label>{editValueSource === "global" ? "Global variable" : "Value"}</label>
+                                                                            {editValueSource === "global" ? (
                                                                                 <select
                                                                                     value={editGlobalName}
                                                                                     onChange={(e) => setEditGlobalName(e.target.value)}
@@ -1083,10 +1092,16 @@ export default function RunPanel({
                                                                                         </option>
                                                                                     ))}
                                                                                 </select>
-                                                                            </div>
-                                                                        )}
-                                                </div>
-                                                <div className="point-tag-actions">
+                                                                            ) : (
+                                                                                <input
+                                                                                    type="number"
+                                                                                    value={editValue}
+                                                                                    onChange={(e) => setEditValue(Number(e.target.value))}
+                                                                                />
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="point-tag-actions">
                                                                         <button
                                                                             className="btn primary"
                                                                             onClick={() => {
@@ -1180,56 +1195,49 @@ export default function RunPanel({
 
                                         {isAddingTag && addTagPointIndex === pointIndex && (
                                             <div className="point-tag-item" style={{background: 'rgba(92, 210, 255, 0.08)', borderColor: 'rgba(92, 210, 255, 0.2)'}}>
-                                                <div className="field">
-                                                    <label>Tag Type</label>
-                                                    <select
-                                                        value={newTagName}
-                                                        onChange={(e) => {
-                                                            const selectedName = e.target.value;
-                                                            setNewTagName(selectedName);
-                                                            // Set default values based on tag type
-                                                            const template = TAG_TEMPLATES.find((entry) => entry.name === selectedName);
-                                                            if (template && template.defaultValue !== undefined) {
-                                                                setNewTagValue(template.defaultValue);
-                                                            } else {
-                                                                setNewTagValue("");
-                                                            }
-                                                        }}
-                                                        autoFocus
-                                                    >
-                                                        <option value="">-- Select Tag Type --</option>
-                                                        {TAG_TEMPLATES.map((template) => (
-                                                            <option key={template.name} value={template.name}>
-                                                                {template.name}{template.unit ? ` - ${template.unit}` : ""}
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                </div>
-                                                <div className="field-grid">
+                                                <div className="field-grid tag-add-fields">
                                                     <div className="field">
-                                                        <label>Value</label>
-                                                        <input
-                                                            type="number"
-                                                            step="0.1"
-                                                            value={newTagValue}
-                                                            onChange={(e) => setNewTagValue(e.target.value)}
-                                                            placeholder="0"
-                                                            disabled={newTagValueSource === "global"}
-                                                        />
+                                                        <label>Tag Type</label>
+                                                        <select
+                                                            value={newTagName}
+                                                            onChange={(e) => {
+                                                                const selectedName = e.target.value;
+                                                                setNewTagName(selectedName);
+                                                                // Set default values based on tag type
+                                                                const template = TAG_TEMPLATES.find((entry) => entry.name === selectedName);
+                                                                if (template && template.defaultValue !== undefined) {
+                                                                    setNewTagValue(template.defaultValue);
+                                                                } else {
+                                                                    setNewTagValue("");
+                                                                }
+                                                            }}
+                                                            autoFocus
+                                                        >
+                                                            <option value="">-- Select Tag Type --</option>
+                                                            {TAG_TEMPLATES.map((template) => (
+                                                                <option key={template.name} value={template.name}>
+                                                                    {template.name}{template.unit ? ` - ${template.unit}` : ""}
+                                                                </option>
+                                                            ))}
+                                                        </select>
                                                     </div>
                                                     <div className="field">
                                                         <label>Value source</label>
                                                         <select
                                                             value={newTagValueSource}
-                                                            onChange={(e) => setNewTagValueSource(e.target.value)}
+                                                            onChange={(e) => {
+                                                                const source = e.target.value;
+                                                                setNewTagValueSource(source);
+                                                                if (source !== "global") setNewTagGlobalName("");
+                                                            }}
                                                         >
                                                             <option value="manual">Manual</option>
                                                             <option value="global" disabled={!globalVars?.length}>Global variable</option>
                                                         </select>
                                                     </div>
-                                                    {newTagValueSource === "global" && (
-                                                        <div className="field">
-                                                            <label>Global variable</label>
+                                                    <div className="field">
+                                                        <label>{newTagValueSource === "global" ? "Global variable" : "Value"}</label>
+                                                        {newTagValueSource === "global" ? (
                                                             <select
                                                                 value={newTagGlobalName}
                                                                 onChange={(e) => setNewTagGlobalName(e.target.value)}
@@ -1241,8 +1249,16 @@ export default function RunPanel({
                                                                     </option>
                                                                 ))}
                                                             </select>
-                                                        </div>
-                                                    )}
+                                                        ) : (
+                                                            <input
+                                                                type="number"
+                                                                step="0.1"
+                                                                value={newTagValue}
+                                                                onChange={(e) => setNewTagValue(e.target.value)}
+                                                                placeholder="0"
+                                                            />
+                                                        )}
+                                                    </div>
                                                 </div>
                                                 <div className="point-tag-actions">
                                                     <button
@@ -1396,16 +1412,6 @@ const Stat = ({label, value}) => (
 );
 
 const toFixed = (value, precision = 1) => Number(value || 0).toFixed(precision);
-
-
-
-
-
-
-
-
-
-
 
 
 

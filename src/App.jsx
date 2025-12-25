@@ -158,6 +158,17 @@ function buildSpeedProfile(waypoints, vmax_in_s, a_max_in_s2) {
     return {s, v, t, totalLen, totalTime, sOfT};
 }
 
+const cloneSegments = (segments) =>
+    segments.map((segment) => ({
+        ...segment,
+        end: segment.end ? {...segment.end} : segment.end,
+        control: segment.control ? {...segment.control} : segment.control,
+        mid: segment.mid ? {...segment.mid} : segment.mid,
+        samples: Array.isArray(segment.samples) ? segment.samples.map((sample) => ({...sample})) : segment.samples,
+    }));
+
+const cloneTags = (tags) => tags.map((tag) => ({...tag}));
+
 
 export default function App() {
     const canvasSize = DEFAULT_CANVAS_SIZE;
@@ -270,7 +281,7 @@ export default function App() {
 
     const [robotDimensions, setRobotDimensions] = useState({...DEFAULT_ROBOT_DIMENSIONS});
 
-    const [showGrid, setShowGrid] = useState(false);
+    const [showGrid, setShowGrid] = useState(true);
     const [gridStep, setGridStep] = useState(GRID_DEFAULT_STEP);
     const [gridStepEntry, setGridStepEntry] = useState(String(GRID_DEFAULT_STEP));
 
@@ -285,6 +296,7 @@ export default function App() {
     const uploadTimerRef = useRef(null);
     const runTimerRef = useRef(null);
     const undoRef = useRef(() => {});
+    const undoSuspendRef = useRef(false);
 
     const { isConnected, robotStatus, robotConfig, sendInit, sendStart, sendStop, livePose } = useRobotConnection(HUB_IP);
     const robotState = robotStatus?.activeOpModeStatus || null;
@@ -458,15 +470,60 @@ export default function App() {
         }
     };
 
+    const recordUndoSnapshot = useCallback((segmentsSnapshot) => {
+        if (undoSuspendRef.current) return;
+        setUndoStack((prev) => [
+            ...prev,
+            {
+                type: "snapshot",
+                segments: cloneSegments(segmentsSnapshot ?? segments),
+                tags: cloneTags(tags),
+                startPose: {...startPose},
+                selectedPointIndices: [...selectedPointIndices],
+                expandedPointIndex,
+            },
+        ]);
+    }, [segments, tags, startPose, selectedPointIndices, expandedPointIndex]);
+
+    const beginEditAction = useCallback(() => {
+        if (!undoSuspendRef.current) {
+            recordUndoSnapshot(segments);
+        }
+        undoSuspendRef.current = true;
+    }, [recordUndoSnapshot, segments]);
+
+    const endEditAction = useCallback(() => {
+        undoSuspendRef.current = false;
+    }, []);
+
     const undoLast = useCallback(() => {
         if (bezierTemp) { setBezierTemp(null); setPreview(null); return; }
         if (arcTemp)    { setArcTemp(null);    setPreview(null); return; }
         if (undoStack.length === 0) return;
         const last = undoStack[undoStack.length - 1];
+        if (last?.type === "snapshot") {
+            setSegmentsInternal(cloneSegments(last.segments ?? []));
+            setTags(cloneTags(last.tags ?? []));
+            if (last.startPose) setStartPose(last.startPose);
+            setSelectedPointIndices(last.selectedPointIndices ?? []);
+            setExpandedPointIndex(last.expandedPointIndex ?? null);
+            setUndoStack((prev) => prev.slice(0, -1));
+            return;
+        }
         const removeCount = Math.max(0, last?.count ?? 0);
         if (removeCount > 0) setSegments((prev) => prev.slice(0, Math.max(0, prev.length - removeCount)));
         setUndoStack((prev) => prev.slice(0, -1));
-    }, [bezierTemp, arcTemp, undoStack, setSegments]);
+    }, [
+        bezierTemp,
+        arcTemp,
+        undoStack,
+        setSegments,
+        setSegmentsInternal,
+        setTags,
+        setStartPose,
+        setSelectedPointIndices,
+        setExpandedPointIndex,
+    ]);
 
     useEffect(() => { undoRef.current = undoLast; }, [undoLast]);
 
@@ -698,15 +755,17 @@ export default function App() {
 
     // Point editing functions (segment endpoints)
     const updateStartPose = useCallback((updates) => {
+        recordUndoSnapshot(segments);
         setStartPose((prev) => ({
             ...prev,
             x: updates.x !== undefined ? Number(updates.x) : prev.x,
             y: updates.y !== undefined ? Number(updates.y) : prev.y,
             h: updates.h !== undefined ? normDeg(Number(updates.h)) : prev.h,
         }));
-    }, []);
+    }, [recordUndoSnapshot, segments]);
 
     const updatePoint = (index, updates) => {
+        recordUndoSnapshot(segments);
         setSegments((prev) => {
             const next = prev.map((segment) => ({...segment, end: {...segment.end}}));
             const target = next[index];
@@ -722,6 +781,7 @@ export default function App() {
     };
 
     const updateSegmentControl = (index, updates) => {
+        recordUndoSnapshot(segments);
         setSegments((prev) => {
             const next = prev.map((segment) => ({...segment, control: segment.control ? {...segment.control} : segment.control}));
             const target = next[index];
@@ -736,6 +796,7 @@ export default function App() {
     };
 
     const updateSegmentMid = (index, updates) => {
+        recordUndoSnapshot(segments);
         setSegments((prev) => {
             const next = prev.map((segment) => ({...segment, mid: segment.mid ? {...segment.mid} : segment.mid}));
             const target = next[index];
@@ -750,6 +811,7 @@ export default function App() {
     };
 
     const updateSegmentHeadingMode = (index, mode) => {
+        recordUndoSnapshot(segments);
         setSegments((prev) => {
             const next = prev.map((segment) => ({...segment}));
             const target = next[index];
@@ -765,6 +827,7 @@ export default function App() {
 
     // Update multiple points at once (for multi-selection drag)
     const updatePoints = (indices, deltaX, deltaY) => {
+        recordUndoSnapshot(segments);
         setSegments((prev) => {
             const next = prev.map((segment) => ({...segment, end: {...segment.end}}));
             indices.forEach((index) => {
@@ -780,6 +843,7 @@ export default function App() {
     };
 
     const deletePoint = (index) => {
+        recordUndoSnapshot(segments);
         setSegments((prev) => rebuildSegments(prev.filter((_, i) => i !== index)));
         setSelectedPointIndices((prev) => prev.filter((i) => i !== index).map((i) => (i > index ? i - 1 : i)));
         setExpandedPointIndex((prev) => {
@@ -797,6 +861,8 @@ export default function App() {
 
     // Delete multiple selected points
     const deletePoints = (indices) => {
+        if (!indices?.length) return;
+        recordUndoSnapshot(segments);
         const sortedIndices = [...indices].sort((a, b) => b - a);
         setSegments((prev) => rebuildSegments(prev.filter((_, i) => !indices.includes(i))));
         setSelectedPointIndices([]);
@@ -814,6 +880,7 @@ export default function App() {
 
     const reorderPoints = (fromIndex, toIndex) => {
         if (fromIndex === toIndex) return;
+        recordUndoSnapshot(segments);
         setSegmentsInternal((prev) => {
             const next = [...prev];
             const [moved] = next.splice(fromIndex, 1);
@@ -1397,14 +1464,16 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                 selectedPointIndices={selectedPointIndices}
                 setSelectedPointIndices={setSelectedPointIndices}
                     updatePoint={updatePoint}
-                    updatePoints={updatePoints}
-                    deletePoints={deletePoints}
-                    onUpdateSegmentControl={updateSegmentControl}
-                    onUpdateSegmentMid={updateSegmentMid}
-                    highlightSelection={expandedPointIndex !== null}
-                    palette={palette}
-                    fieldSize={fieldSize}
-                />
+                updatePoints={updatePoints}
+                deletePoints={deletePoints}
+                onUpdateSegmentControl={updateSegmentControl}
+                onUpdateSegmentMid={updateSegmentMid}
+                onBeginEditAction={beginEditAction}
+                onEndEditAction={endEditAction}
+                highlightSelection={expandedPointIndex !== null}
+                palette={palette}
+                fieldSize={fieldSize}
+            />
             </div>
 
             {!isNarrow && (
@@ -1469,8 +1538,3 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
         </div>
     );
 }
-
-
-
-
-

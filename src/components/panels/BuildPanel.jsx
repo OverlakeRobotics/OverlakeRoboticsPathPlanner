@@ -157,7 +157,7 @@ export default function BuildPanel({
                         />
                     </div>
                     <button
-                        className="btn danger"
+                        className="btn danger grid-action"
                         onClick={() => deletePoint(selectedPointIndex)}
                     >
                         Delete Point
@@ -351,7 +351,7 @@ export default function BuildPanel({
                 <span className="collapse-caret">{openSections.globals ? "\u25BE" : "\u25B8"}</span>
             </div>
             {openSections.globals && (
-                <div id="globals-card">
+                <div id="globals-card" className="globals-card">
                     <div className="field-grid">
                         <Field label="Name">
                             <input
@@ -387,32 +387,26 @@ export default function BuildPanel({
                     </button>
 
                     {globalVars.length > 0 ? (
-                        <div className="point-tag-list" style={{marginTop: '0.75rem'}}>
+                        <div className="point-tag-list global-vars-list">
                             {globalVars.map((entry) => (
-                                <div key={entry.name} className="point-tag-item">
-                                    <div className="point-tag-header">
-                                        <div style={{flex: 1, minWidth: 0}}>
-                                            <span className="point-tag-name">{entry.name}</span>
-                                        </div>
-                                    </div>
-                                    <div className="field-grid">
-                                        <Field label="Value">
-                                            <input
-                                                type="number"
-                                                step={0.1}
-                                                value={entry.value}
-                                                onChange={(event) => onUpdateGlobalVar?.(entry.name, event.target.value)}
-                                            />
-                                        </Field>
-                                    </div>
-                                    <div className="point-tag-actions">
-                                        <button
-                                            className="btn danger"
-                                            onClick={() => onRemoveGlobalVar?.(entry.name)}
-                                        >
-                                            Delete
-                                        </button>
-                                    </div>
+                                <div key={entry.name} className="point-tag-item global-var-item">
+                                    <span className="point-tag-name" title={entry.name}>
+                                        {entry.name}
+                                    </span>
+                                    <input
+                                        className="global-var-input"
+                                        type="number"
+                                        step={0.1}
+                                        value={entry.value}
+                                        onChange={(event) => onUpdateGlobalVar?.(entry.name, event.target.value)}
+                                        aria-label={`Value for ${entry.name}`}
+                                    />
+                                    <button
+                                        className="btn danger"
+                                        onClick={() => onRemoveGlobalVar?.(entry.name)}
+                                    >
+                                        Delete
+                                    </button>
                                 </div>
                             ))}
                         </div>
@@ -524,9 +518,6 @@ function normalizeHeading(angle) {
     if (a <= -180) a += 360;
     return a;
 }
-
-
-
 
 
 
