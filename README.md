@@ -3,6 +3,8 @@
 Overlake Path Planner is a browser-based tool for creating autonomous paths for FTC robots.
 It runs fully offline from a release zip and can be opened by double-clicking `index.html`.
 
+This tool is just the frontend webapp you can use to draw autonomous paths with actions. For the recommended code to run on your robot that will interface with this webapp, see https://github.com/OverlakeRobotics/OverlakeRoboticsLibrary. 
+
 ## Quick Start
 
 1. Download the latest release zip from the GitHub releases on the right
