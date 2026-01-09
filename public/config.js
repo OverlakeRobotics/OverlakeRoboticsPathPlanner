@@ -27,7 +27,7 @@ window.__APP_CONFIG__ = {
     length: 18,
     width: 18
   },
-  POSE_POLL_INTERVAL_MS: 500,
+  POSE_POLL_INTERVAL_MS: 33,
   HUB_IP: "192.168.43.1",
   HUB_PORT: 8099,
   LIVE_POSE_SYNC_PREFIX: "init",

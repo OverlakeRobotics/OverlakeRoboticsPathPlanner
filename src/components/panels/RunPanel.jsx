@@ -60,6 +60,7 @@ export default function RunPanel({
                                      isConnected,
                                      robotStatus,
                                      robotConfig,
+                                     waitForOpMode,
                                      onInstantUploadInit,
                                      onInit,
                                      onStart,
@@ -93,6 +94,8 @@ export default function RunPanel({
     const draggedTagPointIndexRef = useRef(null);
     // Selected op mode must be chosen before initializing the robot
     const [selectedOpMode, setSelectedOpMode] = useState("");
+    const [opModeWarning, setOpModeWarning] = useState(null);
+    const opModeWarningTimerRef = useRef(null);
 
     const [isAddingTag, setIsAddingTag] = useState(false);
     const [addTagPointIndex, setAddTagPointIndex] = useState(null);
@@ -125,6 +128,13 @@ export default function RunPanel({
     useEffect(() => () => {
         if (closingTimerRef.current) {
             clearTimeout(closingTimerRef.current);
+        }
+    }, []);
+
+    useEffect(() => () => {
+        if (opModeWarningTimerRef.current) {
+            clearTimeout(opModeWarningTimerRef.current);
+            opModeWarningTimerRef.current = null;
         }
     }, []);
 
@@ -244,16 +254,37 @@ export default function RunPanel({
     const robotStatusRef = useRef(robotStatus);
     useEffect(() => { robotStatusRef.current = robotStatus; }, [robotStatus]);
 
-    const waitForOpMode = (opMode, timeoutMs = 6000) => new Promise((resolve, reject) => {
+    const fallbackWaitForOpMode = (opMode, timeoutMs = 6000) => new Promise((resolve, reject) => {
+        const target = String(opMode || "").toLowerCase();
         const deadline = Date.now() + timeoutMs;
         const check = () => {
             const cur = robotStatusRef.current;
-            if (cur && cur.opMode && String(cur.opMode).includes(opMode)) return resolve(true);
+            const current = String(cur?.opMode || "").toLowerCase();
+            if (target && current.includes(target)) return resolve(true);
             if (Date.now() > deadline) return reject(new Error('timeout'));
             setTimeout(check, 200);
         };
         check();
     });
+
+    const clearOpModeWarning = () => {
+        if (opModeWarningTimerRef.current) {
+            clearTimeout(opModeWarningTimerRef.current);
+            opModeWarningTimerRef.current = null;
+        }
+        setOpModeWarning(null);
+    };
+
+    const showOpModeWarning = (message) => {
+        setOpModeWarning(message);
+        if (opModeWarningTimerRef.current) {
+            clearTimeout(opModeWarningTimerRef.current);
+        }
+        opModeWarningTimerRef.current = setTimeout(() => {
+            setOpModeWarning(null);
+            opModeWarningTimerRef.current = null;
+        }, 4500);
+    };
 
     useEffect(() => {
         // Sync local initialized state with robotStatus prop
@@ -288,39 +319,53 @@ export default function RunPanel({
         }
     }, [robotConfig?.opModeList, selectedOpMode]);
 
+    useEffect(() => {
+        clearOpModeWarning();
+    }, [selectedOpMode]);
+
     const handleUploadClick = async () => {
         if (!selectedOpMode) {
             setDebugMsg('Select an OpMode before initializing/uploading.');
             return;
         }
-        
-        // If already initialized to the correct opmode, just upload
-        const currentOpMode = robotStatusRef.current?.opMode || '';
-        const currentStatus = robotStatusRef.current?.status || '';
-        if (currentOpMode.includes(selectedOpMode) && currentStatus !== 'STOPPED') {
-             setDebugMsg('Already initialized, uploading...');
-             if (onUpload) onUpload();
-             setHasSentInit(true);
-             return;
-        }
 
-        setDebugMsg(`Initializing ${selectedOpMode}...`);
+        clearOpModeWarning();
+        const waitFn = typeof waitForOpMode === 'function' ? waitForOpMode : fallbackWaitForOpMode;
+        const performUpload = async () => {
+            if (onUpload) await onUpload(selectedOpMode);
+            setDebugMsg('Upload requested');
+        };
+
         try {
+            const currentOpMode = String(robotStatusRef.current?.opMode || '');
+            const currentStatus = robotStatusRef.current?.status || '';
+            if (currentOpMode.toLowerCase().includes(String(selectedOpMode).toLowerCase()) && currentStatus !== 'STOPPED') {
+                setDebugMsg('Already initialized, uploading...');
+                await performUpload();
+                setHasSentInit(true);
+                return;
+            }
+
+            setDebugMsg(`Initializing ${selectedOpMode}...`);
             if (onInit) onInit(selectedOpMode);
             setHasSentInit(true);
-            
-            // Wait for robot to report it is in the correct OpMode
-            await waitForOpMode(selectedOpMode);
-            
+
+            await waitFn(selectedOpMode);
+
             setDebugMsg('Initialized! Uploading path...');
-            // Small delay to ensure robot is ready to accept commands/files
-            await new Promise(r => setTimeout(r, 500));
-            
-            if (onUpload) onUpload();
-            setDebugMsg('Upload requested');
+            await new Promise((resolve) => setTimeout(resolve, 500));
+
+            await performUpload();
         } catch (e) {
             console.error(e);
-            setDebugMsg('Init/Upload failed or timed out');
+            setHasSentInit(false);
+            if (e?.code === 'PATH_SERVER_UNAVAILABLE') {
+                const incompatibleName = e?.opModeName || selectedOpMode;
+                showOpModeWarning(`${incompatibleName} is not running the Path Server. Please select a compatible OpMode.`);
+                setDebugMsg('OpMode incompatible');
+            } else {
+                setDebugMsg('Init/Upload failed or timed out');
+            }
         }
     };
     
@@ -353,6 +398,23 @@ export default function RunPanel({
                     </div>
                     <div className="card-actions stack">
                         {/* Primary Upload (INIT then Upload) */}
+                        {opModeWarning && (
+                            <div
+                                role="alert"
+                                style={{
+                                    background: 'rgba(248, 113, 113, 0.15)',
+                                    border: '1px solid rgba(248, 113, 113, 0.4)',
+                                    color: '#fecaca',
+                                    padding: '0.5rem',
+                                    borderRadius: '6px',
+                                    fontSize: '0.85rem',
+                                    textAlign: 'center',
+                                    marginBottom: '0.25rem'
+                                }}
+                            >
+                                {opModeWarning}
+                            </div>
+                        )}
                         <button 
                             className={uploadClass(uploadStatus)} 
                             onClick={handleUploadClick}
@@ -442,7 +504,7 @@ export default function RunPanel({
                                     className="btn ok"
                                     onClick={handleInitStartClick}
                                 >
-                                    {(initialized || hasSentInit) ? '? Start' : 'Init'}
+                                    {(initialized || hasSentInit) ? '▶ Start' : 'Init'}
                                 </button>
                                 <button 
                                     className="btn danger" 
@@ -1412,16 +1474,6 @@ const Stat = ({label, value}) => (
 );
 
 const toFixed = (value, precision = 1) => Number(value || 0).toFixed(precision);
-
-
-
-
-
-
-
-
-
-
 
 
 

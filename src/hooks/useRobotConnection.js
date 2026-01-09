@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { usePosePolling } from './usePosePolling';
 import { RobotWebSocket } from '../utils/websocket';
-import { HUB_WS_PORT } from '../constants/config';
+import { HUB_PORT, HUB_WS_PORT } from '../constants/config';
 
 export function useRobotConnection(hubIp) {
     const [isConnected, setIsConnected] = useState(false);
@@ -12,8 +12,11 @@ export function useRobotConnection(hubIp) {
 
     const socketRef = useRef(null);
     const robotStatusRef = useRef(null);
-    const isPathPlanner = robotStatus && robotStatus.opMode === 'Path Planner';
-    const { livePose: polledPose } = usePosePolling({ enabled: isPathPlanner, hubUrl: `http://${hubIp}:8099/pose` });
+    const shouldPollPose = Boolean(hubIp);
+    const { livePose: polledPose } = usePosePolling({
+        enabled: shouldPollPose,
+        hubUrl: `http://${hubIp}:8099/pose`
+    });
 
     useEffect(() => {
         const socket = new RobotWebSocket(hubIp, HUB_WS_PORT);
@@ -89,7 +92,11 @@ export function useRobotConnection(hubIp) {
                     const cfgRoot = message.configRoot || message.config || null;
                     if (cfgRoot) {
                         const unwrapped = unwrap(cfgRoot);
-                        setRobotConfig(unwrapped);
+                        setRobotConfig((prev) => {
+                            const base = prev && typeof prev === 'object' ? prev : {};
+                            const next = typeof unwrapped === 'object' && unwrapped !== null ? unwrapped : {};
+                            return { ...base, ...next };
+                        });
                     }
                 } catch (e) {
                     console.error('Error unwrapping config message', e);
@@ -113,7 +120,12 @@ export function useRobotConnection(hubIp) {
             if (!current) return polledPose;
             const curT = Number(current.t || 0);
             const polledT = Number(polledPose.t || 0);
-            return polledT > curT ? polledPose : current;
+            if (polledT > curT) return polledPose;
+            const positionChanged =
+                Math.abs(Number(polledPose.x) - Number(current.x)) > 1e-3 ||
+                Math.abs(Number(polledPose.y) - Number(current.y)) > 1e-3 ||
+                Math.abs(Number(polledPose.h ?? 0) - Number(current.h ?? 0)) > 1e-3;
+            return positionChanged ? polledPose : current;
         });
     }, [polledPose]);
 
@@ -158,6 +170,44 @@ export function useRobotConnection(hubIp) {
         return cur.includes(String(opModeName).toLowerCase());
     }, []);
 
+    const waitForOpMode = useCallback((opModeName, timeoutMs = 6000) => {
+        if (!opModeName) return Promise.reject(new Error('opModeName is required'));
+        const target = String(opModeName).toLowerCase();
+        return new Promise((resolve, reject) => {
+            const deadline = Date.now() + timeoutMs;
+            const poll = () => {
+                const status = robotStatusRef.current;
+                const current = String(status?.opMode || status?.raw?.activeOpMode || '').toLowerCase();
+                if (current.includes(target)) {
+                    resolve(true);
+                    return;
+                }
+                if (Date.now() > deadline) {
+                    reject(new Error('timeout'));
+                    return;
+                }
+                setTimeout(poll, 200);
+            };
+            poll();
+        });
+    }, []);
+
+    const checkPathServer = useCallback(async ({ timeoutMs = 1200 } = {}) => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const response = await fetch(`http://${hubIp}:${HUB_PORT}/pose`, {
+                cache: 'no-store',
+                signal: controller.signal,
+            });
+            return response.ok;
+        } catch {
+            return false;
+        } finally {
+            clearTimeout(timer);
+        }
+    }, [hubIp]);
+
     return {
         isConnected,
         robotStatus,
@@ -167,6 +217,8 @@ export function useRobotConnection(hubIp) {
         sendStart,
         sendStop,
         getRobotStatus,
-        isInitializedFor
+        isInitializedFor,
+        waitForOpMode,
+        checkPathServer
     };
 }

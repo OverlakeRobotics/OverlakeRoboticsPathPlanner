@@ -27,7 +27,7 @@ const DEFAULT_CONFIG = {
         length: 18,
         width: 18,
     },
-    POSE_POLL_INTERVAL_MS: 500,
+    POSE_POLL_INTERVAL_MS: 33, // target roughly 30 fps pose updates
     HUB_IP: "192.168.43.1",
     HUB_PORT: 8099,
     LIVE_POSE_SYNC_PREFIX: "init",
@@ -231,7 +231,6 @@ export const loadRuntimeConfig = async () => {
 };
 
 applyRuntimeConfig();
-
 
 
 

@@ -41,6 +41,34 @@ import {clamp, num, normDeg, toFixed} from "./utils/math";
 import {polylineLength} from "./utils/path";
 import {buildArcSegment, buildBezierSegment, buildLineSegment} from "./utils/segments";
 
+const sleep = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const fetchWithTimeout = async (url, options = {}, timeoutMs = 4000) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        return await fetch(url, {...options, signal: controller.signal});
+    } finally {
+        clearTimeout(timer);
+    }
+};
+
+const isNetworkError = (error) => {
+    if (!error) return false;
+    if (error.name === "AbortError") return true;
+    if (typeof error.message === "string") {
+        const lower = error.message.toLowerCase();
+        return lower.includes("failed to fetch") || lower.includes("network request failed");
+    }
+    return false;
+};
+
+const PATH_SERVER_CHECK_ATTEMPTS = 4;
+const PATH_SERVER_CHECK_DELAY_MS = 300;
+const UPLOAD_REQUEST_TIMEOUT_MS = 4500;
+const UPLOAD_MAX_ATTEMPTS = 3;
+const UPLOAD_RETRY_DELAY_MS = 350;
+
 function wrapAngleRad(a) {
     // wrap to (-Ï€, Ï€]
     let x = a % (2 * Math.PI);
@@ -298,7 +326,17 @@ export default function App() {
     const undoRef = useRef(() => {});
     const undoSuspendRef = useRef(false);
 
-    const { isConnected, robotStatus, robotConfig, sendInit, sendStart, sendStop, livePose } = useRobotConnection(HUB_IP);
+    const {
+        isConnected,
+        robotStatus,
+        robotConfig,
+        sendInit,
+        sendStart,
+        sendStop,
+        livePose,
+        waitForOpMode,
+        checkPathServer
+    } = useRobotConnection(HUB_IP);
     const robotState = robotStatus?.activeOpModeStatus || null;
 
     useEffect(() => {
@@ -993,7 +1031,7 @@ export default function App() {
         }
     };
 
-    const doUpload = () => {
+    const doUpload = async (targetOpMode = "Path Planner") => {
         if (uploadTimerRef.current) clearTimeout(uploadTimerRef.current);
         setUploadStatus("sending");
         const payload = {
@@ -1009,64 +1047,73 @@ export default function App() {
                 value: resolveTagValue(tag),
             })),
         };
-        // Ensure robot is initialized before upload
-        try {
-            sendInit("Path Planner");
-        } catch (e) {
-            // ignore
+        const pathServerReady = await (async () => {
+            if (typeof checkPathServer !== "function") return true;
+            for (let attempt = 0; attempt < PATH_SERVER_CHECK_ATTEMPTS; attempt += 1) {
+                const reachable = await checkPathServer({timeoutMs: 1200});
+                if (reachable) return true;
+                await sleep(PATH_SERVER_CHECK_DELAY_MS);
+            }
+            return false;
+        })();
+
+        if (!pathServerReady) {
+            setUploadStatus("fail");
+            uploadTimerRef.current = setTimeout(() => setUploadStatus("idle"), UPLOAD_RESET_FAIL_MS);
+            const incompatErr = new Error(`${targetOpMode} does not expose a path server`);
+            incompatErr.code = "PATH_SERVER_UNAVAILABLE";
+            incompatErr.opModeName = targetOpMode;
+            throw incompatErr;
         }
 
-        return fetch(`http://${HUB_IP}:8099/points`, {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify(payload),
-        })
-            .then(() => {
+        let lastError = null;
+        for (let attempt = 0; attempt < UPLOAD_MAX_ATTEMPTS; attempt += 1) {
+            try {
+                const response = await fetchWithTimeout(`http://${HUB_IP}:8099/points`, {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify(payload),
+                }, UPLOAD_REQUEST_TIMEOUT_MS);
+                if (!response.ok) {
+                    const httpErr = new Error(`Upload failed with status ${response.status}`);
+                    httpErr.code = "PATH_UPLOAD_HTTP_ERROR";
+                    httpErr.status = response.status;
+                    throw httpErr;
+                }
                 setUploadStatus("ok");
                 uploadTimerRef.current = setTimeout(() => setUploadStatus("idle"), UPLOAD_RESET_OK_MS);
-            })
-            .catch((e) => {
+                return true;
+            } catch (error) {
+                lastError = error;
+                const shouldRetry = attempt < UPLOAD_MAX_ATTEMPTS - 1 && isNetworkError(error);
+                if (shouldRetry) {
+                    await sleep(UPLOAD_RETRY_DELAY_MS);
+                    continue;
+                }
                 setUploadStatus("fail");
                 uploadTimerRef.current = setTimeout(() => setUploadStatus("idle"), UPLOAD_RESET_FAIL_MS);
-                throw e;
-            });
+                throw error;
+            }
+        }
+        throw lastError || new Error("Unknown upload error");
     };
 
-    const doInstantUploadInit = async () => {
+    const doInstantUploadInit = async (targetOpMode = "Path Planner") => {
         // First request the robot to init the Path Planner op mode, then upload once the robot reports the op mode.
         try {
             setUploadStatus("sending");
-            sendInit("Path Planner");
+            sendInit(targetOpMode);
 
-            // Wait up to 6s for the robotStatus.opMode to reflect the requested op mode
-            const start = Date.now();
-            const timeoutMs = 6000;
-            const pollMs = 400;
-            let ready = false;
-            while (Date.now() - start < timeoutMs) {
-                // Prefer explicit opMode match; fall back to presence of robotConfig or connection
-                if (robotStatus && robotStatus.opMode && String(robotStatus.opMode).includes("Path")) {
-                    ready = true;
-                    break;
-                }
-                if (robotConfig) {
-                    ready = true;
-                    break;
-                }
-                // sleep
-                // eslint-disable-next-line no-await-in-loop
-                await new Promise((r) => setTimeout(r, pollMs));
-            }
-
-            if (!ready) {
-                // Robot didn't come up in time; mark failure
+            try {
+                await waitForOpMode(targetOpMode, 6000);
+            } catch (err) {
                 setUploadStatus("fail");
                 uploadTimerRef.current = setTimeout(() => setUploadStatus("idle"), UPLOAD_RESET_FAIL_MS);
                 return;
             }
 
             // Now perform the upload
-            await doUpload();
+            await doUpload(targetOpMode);
         } catch (e) {
             // doUpload and other failures already set status; ensure it's marked
             setUploadStatus((s) => (s === "sending" ? "fail" : s));
@@ -1529,6 +1576,7 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                 isConnected={isConnected}
                 robotStatus={robotStatus}
                 robotConfig={robotConfig}
+                waitForOpMode={waitForOpMode}
                 onInstantUploadInit={doInstantUploadInit}
                 onInit={sendInit}
                 onStart={sendStart}
