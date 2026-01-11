@@ -11,6 +11,9 @@ export class RobotWebSocket {
         this.onClose = null;
         this.onError = null;
         this.onMessage = null;
+        
+        // Outbound send queue for messages attempted before socket open
+        this._sendQueue = [];
     }
 
     connect() {
@@ -25,6 +28,24 @@ export class RobotWebSocket {
             this.ws.onopen = () => {
                 console.log('Connected to Robot WebSocket');
                 if (this.onOpen) this.onOpen();
+
+                // Flush queued messages (resolve their promises after sending)
+                if (this._sendQueue && this._sendQueue.length) {
+                    try {
+                        while (this._sendQueue.length) {
+                            const item = this._sendQueue.shift();
+                            try {
+                                console.log('Flushing queued message', item.payload);
+                                this.ws.send(JSON.stringify(item.payload));
+                                if (item.resolve) item.resolve(true);
+                            } catch (err) {
+                                if (item.reject) item.reject(err);
+                            }
+                        }
+                    } catch (e) {
+                        console.error('Error flushing send queue', e);
+                    }
+                }
             };
 
             this.ws.onclose = () => {
@@ -65,17 +86,28 @@ export class RobotWebSocket {
     }
 
     send(payload) {
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            console.log(`WebSocket sending: ${JSON.stringify(payload)}`);
-            this.ws.send(JSON.stringify(payload));
-        } else {
-            console.log(`WebSocket not open, readyState: ${this.ws ? this.ws.readyState : 'no ws'}`);
+        // Return a promise that resolves when the message is actually sent (or queued)
+        try {
+            if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                console.log(`WebSocket sending: ${JSON.stringify(payload)}`);
+                this.ws.send(JSON.stringify(payload));
+                return Promise.resolve(true);
+            }
+        } catch (e) {
+            console.error('WebSocket send immediate failed', e);
+            return Promise.reject(e);
         }
+
+        // Not open: queue the message and return a promise that will resolve on flush
+        return new Promise((resolve, reject) => {
+            console.log(`WebSocket not open, queuing payload: ${JSON.stringify(payload)}`);
+            this._sendQueue.push({payload, resolve, reject, queuedAt: Date.now()});
+        });
     }
 
     sendInit(opModeName) {
         console.log(`WebSocket sendInit called with opModeName: ${opModeName}`);
-        this.send({ type: 'INIT_OP_MODE', opModeName });
+        return this.send({ type: 'INIT_OP_MODE', opModeName });
     }
 
     sendStart() {
@@ -87,6 +119,6 @@ export class RobotWebSocket {
     }
 
     requestStatus() {
-        this.send({ type: 'GET_ROBOT_STATUS' });
+        return this.send({ type: 'GET_ROBOT_STATUS' });
     }
 }

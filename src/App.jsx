@@ -1102,11 +1102,32 @@ export default function App() {
         // First request the robot to init the Path Planner op mode, then upload once the robot reports the op mode.
         try {
             setUploadStatus("sending");
-            sendInit(targetOpMode);
 
-            try {
-                await waitForOpMode(targetOpMode, 6000);
-            } catch (err) {
+            const MAX_INIT_ATTEMPTS = 2;
+            let initOk = false;
+            let lastInitError = null;
+
+            for (let attempt = 1; attempt <= MAX_INIT_ATTEMPTS; attempt += 1) {
+                try {
+                    // Ensure the INIT message is actually sent (sendInit now returns a promise)
+                    await sendInit(targetOpMode);
+
+                    try {
+                        await waitForOpMode(targetOpMode, 6000);
+                        initOk = true;
+                        break;
+                    } catch (err) {
+                        lastInitError = err;
+                        // allow retry
+                        await sleep(500);
+                    }
+                } catch (err) {
+                    lastInitError = err;
+                    await sleep(500);
+                }
+            }
+
+            if (!initOk) {
                 setUploadStatus("fail");
                 uploadTimerRef.current = setTimeout(() => setUploadStatus("idle"), UPLOAD_RESET_FAIL_MS);
                 return;

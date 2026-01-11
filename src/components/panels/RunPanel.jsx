@@ -347,8 +347,17 @@ export default function RunPanel({
             }
 
             setDebugMsg(`Initializing ${selectedOpMode}...`);
-            if (onInit) onInit(selectedOpMode);
             setHasSentInit(true);
+
+            // Prefer the App-level instant init+upload orchestration if available
+            if (typeof onInstantUploadInit === 'function') {
+                await onInstantUploadInit(selectedOpMode);
+                // onInstantUploadInit handles upload, so we're done
+                return;
+            }
+
+            // Fallback: call send-init then wait then upload
+            if (onInit) await onInit(selectedOpMode);
 
             await waitFn(selectedOpMode);
 

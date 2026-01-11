@@ -148,9 +148,21 @@ export function useRobotConnection(hubIp) {
         };
     }, [isConnected]);
 
-    const sendInit = useCallback((opModeName) => {
+    const sendInit = useCallback(async (opModeName) => {
         console.log('[useRobotConnection] sendInit called with:', opModeName);
-        socketRef.current?.sendInit(opModeName);
+        try {
+            const res = await socketRef.current?.sendInit(opModeName);
+            // After sending INIT, request an immediate status so waiters see the change quickly
+            try {
+                socketRef.current?.requestStatus();
+            } catch (e) {
+                // ignore
+            }
+            return res;
+        } catch (e) {
+            console.error('[useRobotConnection] sendInit error', e);
+            throw e;
+        }
     }, []);
 
     const sendStart = useCallback(() => {
