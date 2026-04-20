@@ -52,3 +52,8 @@ Global variables let you update many tag values from a single number.
 
 - The app is designed to run offline from a local `index.html`.
 - If you update `config.js`, refresh the page to load changes.
+
+## Help
+
+- Feel free to join our discord to ask any questions as well as give suggestions + feedback!
+- Link: <https://discord.gg/VX8bzcFATE>
