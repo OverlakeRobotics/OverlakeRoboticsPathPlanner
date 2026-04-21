@@ -52,6 +52,8 @@ Global variables let you update many tag values from a single number.
 
 - The app is designed to run offline from a local `index.html`.
 - If you update `config.js`, refresh the page to load changes.
+  - **If you have a path drawn, make sure to export the JSON before refreshing, otherwise you will lose your path!**
+  - The page will also refresh if you close your computer, so make sure to export before doing that!
 
 ## Help
 
