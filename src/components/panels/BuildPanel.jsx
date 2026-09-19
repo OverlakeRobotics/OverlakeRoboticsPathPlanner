@@ -228,14 +228,16 @@ export default function BuildPanel({
                 <span className="collapse-caret">{openSections.heading ? "\u25BE" : "\u25B8"}</span>
             </div>
             {openSections.heading && (
-                <div className="button-group compact" id="heading-card">
-                    <SegmentButton label="Straight" active={headingMode === "straight"} onClick={() => setHeadingMode("straight")} />
-                    <SegmentButton label="Tangent" active={headingMode === "tangent"} onClick={() => setHeadingMode("tangent")} />
-                    <SegmentButton label="Orthogonal L" active={headingMode === "orth-left"} onClick={() => setHeadingMode("orth-left")} />
-                    <SegmentButton label="Orthogonal R" active={headingMode === "orth-right"} onClick={() => setHeadingMode("orth-right")} />
+                <>
+                    <div className="button-group compact" id="heading-card">
+                        <SegmentButton label="Straight" active={headingMode === "straight"} onClick={() => setHeadingMode("straight")} />
+                        <SegmentButton label="Tangent" active={headingMode === "tangent"} onClick={() => setHeadingMode("tangent")} />
+                        <SegmentButton label="Orthogonal L" active={headingMode === "orth-left"} onClick={() => setHeadingMode("orth-left")} />
+                        <SegmentButton label="Orthogonal R" active={headingMode === "orth-right"} onClick={() => setHeadingMode("orth-right")} />
+                    </div>
                     {headingMode === "straight" && (
-                        <div className="field">
-                            <label>Desired end Heading (deg)</label>
+                        <div className="field" style={{marginTop: "10px"}}>
+                            <label>Desired end heading (deg)</label>
                             <input
                                 type="text"
                                 value={String(endHeading)}
@@ -251,7 +253,7 @@ export default function BuildPanel({
                             />
                         </div>
                     )}
-                </div>
+                </>
             )}
         </section>
     );

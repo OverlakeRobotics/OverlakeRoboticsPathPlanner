@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
     FIELD_SIZE_IN,
     GRID_DEFAULT_STEP,
@@ -35,29 +35,52 @@ export default function SetupModal({ isOpen, onClose, onSave, initialSettings })
     const [palette, setPalette] = useState(DEFAULT_PALETTE);
     const [themeName, setThemeName] = useState("default");
     
+    // Interface style (glass vs. match day)
+    const [uiStyle, setUiStyle] = useState("glass");
+
     // Effects Settings
     const [blurStrength, setBlurStrength] = useState(16);
     const [panelOpacity, setPanelOpacity] = useState(0.85);
     const [cardOpacity, setCardOpacity] = useState(0.6);
-    const [uiScale, setUiScale] = useState(0.8);
+    const [uiScale, setUiScale] = useState(0.9);
+
+    // Keep the latest app settings in a ref so opening the modal reads them
+    // without re-running on every parent render: robot status polling
+    // re-renders App every second, and re-syncing local state mid-edit
+    // silently reverts whatever the user changed.
+    const initialSettingsRef = useRef(initialSettings);
+    useEffect(() => {
+        initialSettingsRef.current = initialSettings;
+    }, [initialSettings]);
 
     useEffect(() => {
-        if (isOpen && initialSettings) {
-            setFieldSize(initialSettings.fieldSize || FIELD_SIZE_IN);
-            setShowGrid(Boolean(initialSettings.showGrid));
-            const step = Number(initialSettings.gridStep);
-            const nextStep = Number.isFinite(step) && step > 0 ? step : GRID_DEFAULT_STEP;
-            setGridStepEntry(initialSettings.gridStepEntry ?? String(nextStep));
-            setRobotDimensions(initialSettings.robotDimensions || {...DEFAULT_ROBOT_DIMENSIONS});
-            setPalette(initialSettings.palette || DEFAULT_PALETTE);
-            
-            setThemeName(initialSettings.themeName || "default");
-            setBlurStrength(initialSettings.blurStrength ?? 16);
-            setPanelOpacity(initialSettings.panelOpacity ?? 0.85);
-            setCardOpacity(initialSettings.cardOpacity ?? 0.6);
-            setUiScale(initialSettings.uiScale ?? 0.8);
-        }
-    }, [isOpen, initialSettings]);
+        if (!isOpen) return;
+        const settings = initialSettingsRef.current;
+        if (!settings) return;
+        setFieldSize(settings.fieldSize || FIELD_SIZE_IN);
+        setShowGrid(Boolean(settings.showGrid));
+        const step = Number(settings.gridStep);
+        const nextStep = Number.isFinite(step) && step > 0 ? step : GRID_DEFAULT_STEP;
+        setGridStepEntry(settings.gridStepEntry ?? String(nextStep));
+        setRobotDimensions(settings.robotDimensions || {...DEFAULT_ROBOT_DIMENSIONS});
+        setPalette(settings.palette || DEFAULT_PALETTE);
+
+        setThemeName(settings.themeName || "default");
+        setUiStyle(settings.uiStyle === "matchday" ? "matchday" : "glass");
+        setBlurStrength(settings.blurStrength ?? 16);
+        setPanelOpacity(settings.panelOpacity ?? 0.85);
+        setCardOpacity(settings.cardOpacity ?? 0.6);
+        setUiScale(settings.uiScale ?? 0.9);
+    }, [isOpen]);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        const handleKeyDown = (event) => {
+            if (event.key === "Escape") onClose();
+        };
+        window.addEventListener("keydown", handleKeyDown);
+        return () => window.removeEventListener("keydown", handleKeyDown);
+    }, [isOpen, onClose]);
 
     const commitGridStep = () => {
         const parsed = parseFloat(gridStepEntry);
@@ -68,19 +91,33 @@ export default function SetupModal({ isOpen, onClose, onSave, initialSettings })
         }
     };
 
+    const clampDimension = (value) => {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed) || parsed <= 0) return 18;
+        return Math.min(36, Math.max(1, parsed));
+    };
+
     const handleSave = () => {
         const parsed = parseFloat(gridStepEntry);
         const resolvedStep = (!gridStepEntry || !Number.isFinite(parsed) || parsed <= 0)
             ? GRID_DEFAULT_STEP
             : parsed;
-        onSave({ 
-            fieldSize, 
+        const parsedField = Number(fieldSize);
+        const resolvedField = Number.isFinite(parsedField) && parsedField >= 24
+            ? Math.min(288, parsedField)
+            : FIELD_SIZE_IN;
+        onSave({
+            fieldSize: resolvedField,
             showGrid,
             gridStep: resolvedStep,
             gridStepEntry: String(resolvedStep),
-            robotDimensions,
+            robotDimensions: {
+                length: clampDimension(robotDimensions.length),
+                width: clampDimension(robotDimensions.width),
+            },
             palette,
             themeName,
+            uiStyle,
             blurStrength,
             panelOpacity,
             cardOpacity,
@@ -96,10 +133,11 @@ export default function SetupModal({ isOpen, onClose, onSave, initialSettings })
         setRobotDimensions({...DEFAULT_ROBOT_DIMENSIONS});
         setPalette(DEFAULT_PALETTE);
         setThemeName("default");
+        setUiStyle("glass");
         setBlurStrength(16);
         setPanelOpacity(0.85);
         setCardOpacity(0.6);
-        setUiScale(0.8);
+        setUiScale(0.9);
     };
 
     const handleThemeSelect = (key) => {
@@ -122,10 +160,13 @@ export default function SetupModal({ isOpen, onClose, onSave, initialSettings })
     if (!isOpen) return null;
 
     return (
-        <div className="modal-overlay">
-            <div className="modal-content setup-modal">
+        <div className="modal-overlay" onClick={onClose}>
+            <div className="modal-content setup-modal" onClick={(e) => e.stopPropagation()}>
                 <div className="modal-header">
                     <h3>Planner Configuration</h3>
+                    <button className="modal-close" onClick={onClose} aria-label="Close without saving">
+                        ×
+                    </button>
                 </div>
                 
                 <div className="button-group compact" style={{ padding: '0 28px', marginTop: '16px' }}>
@@ -162,10 +203,12 @@ export default function SetupModal({ isOpen, onClose, onSave, initialSettings })
                                     <label>Field Size (inches)</label>
                                     <input
                                         type="number"
+                                        min={24}
+                                        max={288}
                                         value={fieldSize}
-                                        onChange={(e) => setFieldSize(Number(e.target.value))}
+                                        onChange={(e) => setFieldSize(e.target.value)}
                                     />
-                                    <span className="field-hint">Total width/height of the square field.</span>
+                                    <span className="field-hint">Total width/height of the square field. FTC fields are 144 in.</span>
                                 </div>
                             </div>
 
@@ -231,6 +274,30 @@ export default function SetupModal({ isOpen, onClose, onSave, initialSettings })
                     {activeTab === 'theme' && (
                         <>
                             <div className="modal-section">
+                                <h3>Interface Style</h3>
+                                <div className="ui-style-grid">
+                                    <button
+                                        type="button"
+                                        className={`ui-style-card${uiStyle === "glass" ? " active" : ""}`}
+                                        onClick={() => setUiStyle("glass")}
+                                        aria-pressed={uiStyle === "glass"}
+                                    >
+                                        <strong>Glass</strong>
+                                        <span>The original translucent look with blur and layered panels.</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className={`ui-style-card${uiStyle === "matchday" ? " active" : ""}`}
+                                        onClick={() => setUiStyle("matchday")}
+                                        aria-pressed={uiStyle === "matchday"}
+                                    >
+                                        <strong>Match Day</strong>
+                                        <span>Flat, high-contrast competition mode with team banner and alliance color.</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="modal-section">
                                 <h3>Theme Presets</h3>
                                 <div className="theme-preset-grid">
                                     {Object.entries(THEME_PRESETS).map(([key, theme]) => (
@@ -285,12 +352,13 @@ export default function SetupModal({ isOpen, onClose, onSave, initialSettings })
 
                             <div className="modal-section">
                                 <h3>Interface Scale</h3>
-                                <SliderField 
-                                    label="UI Scale Factor" 
-                                    value={uiScale} 
-                                    min={0.5} max={1.2} step={0.05} 
-                                    onChange={setUiScale} 
+                                <SliderField
+                                    label="UI Scale Factor"
+                                    value={uiScale}
+                                    min={0.6} max={1.2} step={0.05}
+                                    onChange={setUiScale}
                                 />
+                                <span className="field-hint">Below 0.8 the interface text gets hard to read at arm's length.</span>
                             </div>
                         </>
                     )}
@@ -298,6 +366,7 @@ export default function SetupModal({ isOpen, onClose, onSave, initialSettings })
 
                 <div className="modal-footer">
                     <button className="btn ghost" onClick={handleReset}>Reset Defaults</button>
+                    <button className="btn ghost" onClick={onClose}>Cancel</button>
                     <button className="btn primary" onClick={handleSave}>Apply Settings</button>
                 </div>
             </div>

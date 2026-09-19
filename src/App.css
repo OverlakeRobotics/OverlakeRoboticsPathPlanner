@@ -10,7 +10,8 @@
   --warn: #ffd166;
   --danger: #ff6b6b;
   --shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
-  --scale-factor: 0.8;
+  --scale-factor: 0.9;
+  --alliance: #ef4444;
   
   /* Glassmorphism & UI Settings */
   --blur-strength: 16px;
@@ -66,18 +67,89 @@ body {
   height: calc(100% / var(--scale-factor));
 }
 
+.app-root {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .app-shell {
+  flex: 1 1 auto;
+  min-height: 0;
   height: calc(100vh / var(--scale-factor));
   display: grid;
-  grid-template-columns: var(--left-panel, 380px) 10px minmax(720px, 1fr) 10px var(--right-panel, 420px);
+  /* minmax lets the side panels and canvas shrink below their preferred
+     widths so laptop viewports never overflow horizontally */
+  grid-template-columns:
+    minmax(220px, var(--left-panel, 420px))
+    10px
+    minmax(440px, 1fr)
+    10px
+    minmax(250px, var(--right-panel, 420px));
   gap: 16px;
   padding: 16px;
+}
+
+.app-root.matchday .app-shell {
+  height: auto;
+}
+
+/* Column placement lives here, ABOVE the narrow-viewport override below,
+   so the single-column media query actually wins the cascade. */
+.panel-build {
+  grid-column: 1;
+  min-height: 0;
+}
+
+.canvas-column {
+  grid-column: 3;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+.panel-run {
+  grid-column: 5;
+  min-height: 0;
+  align-self: stretch;
+}
+
+.handle-left {
+  grid-column: 2;
+}
+
+.handle-right {
+  grid-column: 4;
 }
 
 @media (max-width: 980px) {
   .app-shell {
     grid-template-columns: 1fr;
-    grid-auto-rows: minmax(0, 1fr);
+    grid-auto-rows: auto;
+    height: auto;
+  }
+
+  .app-root {
+    height: auto;
+  }
+
+  .resize-handle {
+    display: none;
+  }
+
+  .panel-build,
+  .panel-run {
+    grid-column: auto;
+  }
+
+  .canvas-column {
+    grid-column: auto;
+    grid-row: 1;
+  }
+
+  .canvas-frame {
+    height: 70vh;
   }
 }
 
@@ -92,11 +164,6 @@ body {
   box-shadow: var(--shadow);
   min-height: 0;
   transition: background 0.3s ease, backdrop-filter 0.3s ease;
-}
-
-.panel-build {
-  grid-column: 1;
-  min-height: 0;
 }
 
 .panel-header {
@@ -198,7 +265,7 @@ textarea.code-box {
 
 .card-header p {
   margin: 4px 0 0;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted);
 }
 
@@ -305,7 +372,7 @@ textarea.code-box {
 }
 
 .field label {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted);
 }
 
@@ -335,7 +402,7 @@ textarea.code-box {
 
 .helper-text {
   margin: 0;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted);
 }
 
@@ -458,6 +525,86 @@ textarea.code-box {
   transform: translateY(1px);
 }
 
+.btn:focus-visible,
+.zoom-btn:focus-visible,
+.theme-preset-card:focus-visible,
+.ui-style-card:focus-visible,
+.modal-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn.btn-lg {
+  padding: 14px 16px;
+  font-size: 15px;
+}
+
+.btn.danger-text {
+  color: var(--danger);
+}
+
+.action-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.status-line {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.status-line.ok {
+  background: rgba(107, 230, 117, 0.12);
+  border: 1px solid rgba(107, 230, 117, 0.3);
+  color: #d3f5d6;
+}
+
+.status-line.fail {
+  background: rgba(255, 107, 107, 0.12);
+  border: 1px solid rgba(255, 107, 107, 0.35);
+  color: #ffd7d7;
+}
+
+.status-line .status-stale {
+  font-style: normal;
+  color: var(--warn);
+}
+
+.status-dismiss {
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.7;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+
+.status-dismiss:hover {
+  opacity: 1;
+}
+
 .btn.primary {
   background: var(--accent);
   color: var(--bg);
@@ -503,7 +650,7 @@ textarea.code-box {
 }
 
 .small {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted);
 }
 
@@ -637,22 +784,6 @@ ul.tip-list {
   }
 }
 
-@media (max-width: 980px) {
-  .resize-handle {
-    display: none;
-  }
-
-  .panel-build,
-  .panel-run,
-  .canvas-column {
-    grid-column: auto;
-  }
-
-  .canvas-frame {
-    height: auto;
-  }
-}
-
 .scroll-area::-webkit-scrollbar,
 textarea.code-box::-webkit-scrollbar {
     width: 12px;
@@ -707,21 +838,8 @@ textarea.code-box::-webkit-scrollbar-thumb:hover {
     min-height: 0;
   }
 
-.panel-run {
-  grid-column: 5;
-  min-height: 0;
-  align-self: stretch;
-}
-
 .panel-run .panel-body.scroll-area {
   padding: 12px 18px 20px;
-}
-
-.canvas-column {
-  grid-column: 3;
-  min-height: 0;
-  display: flex;
-  align-items: stretch;
 }
 
 .canvas-frame {
@@ -753,32 +871,25 @@ textarea.code-box::-webkit-scrollbar-thumb:hover {
   background: rgba(92, 210, 255, 0.28);
 }
 
-.handle-left {
-  grid-column: 2;
-}
-
-.handle-right {
-  grid-column: 4;
-}
 .btn.callout {
   border-radius: 999px;
-  background: linear-gradient(180deg, rgba(255, 214, 102, 0.9), rgba(247, 201, 72, 0.75));
+  background: var(--warn);
   color: #2f2200;
-  border: 1px solid rgba(255, 214, 102, 0.9);
+  border: 1px solid rgba(0, 0, 0, 0.25);
   font-weight: 700;
   padding: 9px 16px;
-  box-shadow: 0 6px 18px rgba(255, 214, 102, 0.28);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
 }
 
 .btn.callout:hover:not(:disabled) {
-  filter: brightness(1.03);
+  filter: brightness(1.05);
 }
 
 .btn.callout.secondary {
-  background: linear-gradient(180deg, rgba(92, 210, 255, 0.85), rgba(63, 178, 224, 0.7));
-  color: #052036;
-  border-color: rgba(92, 210, 255, 0.8);
-  box-shadow: 0 6px 18px rgba(92, 210, 255, 0.25);
+  background: rgba(92, 210, 255, 0.16);
+  color: var(--text);
+  border: 1px solid rgba(92, 210, 255, 0.35);
+  box-shadow: none;
 }
 
 .btn.callout:disabled {
@@ -823,10 +934,9 @@ textarea.code-box::-webkit-scrollbar-thumb:hover {
   -webkit-backdrop-filter: blur(calc(var(--blur-strength) * 1.5)) saturate(150%);
   border: 1px solid var(--glass-border);
   border-radius: 20px;
-  box-shadow: 
+  box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.05) inset,
-    0 24px 48px -12px rgba(0, 0, 0, 0.5),
-    0 0 80px -20px rgba(92, 210, 255, 0.15);
+    0 24px 48px -12px rgba(0, 0, 0, 0.5);
   max-width: 500px;
   width: 100%;
   max-height: 90vh;
@@ -895,7 +1005,7 @@ textarea.code-box::-webkit-scrollbar-thumb:hover {
 .field-hint {
   color: var(--muted);
   font-weight: normal;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .tag-template-info {
@@ -1027,19 +1137,19 @@ textarea.code-box::-webkit-scrollbar-thumb:hover {
 .point-tags-shell {
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(0, 0, 0, 0.15);
-  overflow: hidden;
-  max-height: 0;
+  display: grid;
+  grid-template-rows: 0fr;
   opacity: 0;
-  transition: max-height 200ms ease-in-out, opacity 200ms ease-in-out;
+  transition: grid-template-rows 200ms ease-in-out, opacity 200ms ease-in-out;
 }
 
 .point-tags-shell.open {
-  max-height: 2000px;
+  grid-template-rows: 1fr;
   opacity: 1;
 }
 
 .point-tags-shell.closing {
-  max-height: 0;
+  grid-template-rows: 0fr;
   opacity: 0;
 }
 
@@ -1048,6 +1158,7 @@ textarea.code-box::-webkit-scrollbar-thumb:hover {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -1256,10 +1367,9 @@ textarea.code-box::-webkit-scrollbar-thumb:hover {
   backdrop-filter: blur(calc(var(--blur-strength) * 2)) saturate(150%);
   -webkit-backdrop-filter: blur(calc(var(--blur-strength) * 2)) saturate(150%);
   border: 1px solid var(--glass-border);
-  box-shadow: 
+  box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.03) inset,
-    0 32px 64px -16px rgba(0, 0, 0, 0.6),
-    0 0 120px -30px rgba(92, 210, 255, 0.12);
+    0 32px 64px -16px rgba(0, 0, 0, 0.6);
 }
 
 .modal-section {
@@ -1284,29 +1394,21 @@ textarea.code-box::-webkit-scrollbar-thumb:hover {
 
 .modal-section h3 {
   margin: 0 0 14px 0;
-  font-size: 12px;
+  font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-weight: 600;
-  color: var(--accent);
+  color: var(--text);
   display: flex;
   align-items: center;
   gap: 10px;
-}
-
-.modal-section h3::before {
-  content: "";
-  width: 3px;
-  height: 12px;
-  background: var(--accent);
-  border-radius: 2px;
 }
 
 .modal-section h3::after {
   content: "";
   flex: 1;
   height: 1px;
-  background: linear-gradient(90deg, rgba(92, 210, 255, 0.25), transparent 80%);
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .color-grid {
@@ -1452,6 +1554,10 @@ textarea.code-box::-webkit-scrollbar-thumb:hover {
 }
 
 .theme-preset-card {
+  appearance: none;
+  font: inherit;
+  color: inherit;
+  text-align: center;
   padding: 10px;
   border-radius: 12px;
   cursor: pointer;
@@ -1498,7 +1604,256 @@ textarea.code-box::-webkit-scrollbar-thumb:hover {
   background: var(--glass-bg);
   backdrop-filter: blur(var(--blur-strength)) saturate(180%);
   border: 1px solid var(--glass-border);
-  box-shadow: 
+  box-shadow:
     inset 0 0 0 1px var(--glass-highlight),
     0 16px 32px -8px rgba(0, 0, 0, 0.4);
+}
+
+/* Interface style picker (Setup modal) */
+.ui-style-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.ui-style-card {
+  appearance: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border-radius: 12px;
+  cursor: pointer;
+  border: 2px solid transparent;
+  background: rgba(255, 255, 255, 0.03);
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.ui-style-card:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.ui-style-card.active {
+  border-color: var(--accent);
+  background: rgba(92, 210, 255, 0.08);
+}
+
+.ui-style-card strong {
+  font-size: 14px;
+}
+
+.ui-style-card span {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+/* Run panel hierarchy */
+.control-card.run-primary {
+  border: 1px solid rgba(92, 210, 255, 0.35);
+  background: rgba(92, 210, 255, 0.06);
+}
+
+.btn.callout.callout-active {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+
+/* Canvas chrome */
+.zoom-hint {
+  font-size: 11px;
+  color: var(--muted);
+  padding-left: 6px;
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  white-space: nowrap;
+}
+
+.canvas-legend {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow);
+}
+
+.canvas-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.canvas-legend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+  border: 1px solid rgba(0, 0, 0, 0.4);
+}
+
+/* ---- Match Day interface style ----
+   Flat, high-contrast competition mode. Selected in Setup → Theme & Colors.
+   The glass style above stays untouched; everything here is scoped to
+   [data-ui="matchday"]. */
+
+.matchday-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 20px 10px 16px;
+  margin: 12px 16px 0;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--alliance) 10%, #12151b);
+  border: 1px solid color-mix(in srgb, var(--alliance) 30%, #262c37);
+  flex: 0 0 auto;
+}
+
+.mb-brand {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.mb-brand strong {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #f2f5fa;
+}
+
+.mb-brand span {
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #8b95a5;
+}
+
+.mb-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mb-chip {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid #2c3340;
+  background: #191d25;
+  color: #c6cedb;
+}
+
+.mb-alliance {
+  color: #fff;
+  border-color: transparent;
+  background: var(--alliance);
+}
+
+.mb-conn.on {
+  color: #7ee89a;
+  border-color: rgba(107, 230, 117, 0.4);
+}
+
+.mb-conn.off {
+  color: #ff9d9d;
+  border-color: rgba(255, 107, 107, 0.4);
+}
+
+[data-ui="matchday"] body,
+[data-ui="matchday"] {
+  background: #0c0e12;
+}
+
+[data-ui="matchday"] .panel,
+[data-ui="matchday"] .canvas-frame {
+  background: #12151b;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid #262c37;
+  border-radius: 10px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+}
+
+[data-ui="matchday"] .control-card,
+[data-ui="matchday"] .modal-section {
+  background: #171b22;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid #262c37;
+  border-radius: 10px;
+}
+
+[data-ui="matchday"] .control-card.run-primary {
+  border: 1px solid var(--alliance);
+  background: #191d25;
+}
+
+[data-ui="matchday"] .modal-overlay {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: rgba(4, 6, 9, 0.82);
+}
+
+[data-ui="matchday"] .modal-content {
+  background: #12151b;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid #2c3340;
+  border-radius: 12px;
+}
+
+[data-ui="matchday"] .stat-card,
+[data-ui="matchday"] .point-section,
+[data-ui="matchday"] .point-tag-item {
+  background: #10131a;
+  border: 1px solid #232935;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+[data-ui="matchday"] input,
+[data-ui="matchday"] select,
+[data-ui="matchday"] textarea {
+  background: #0d1016;
+  border: 1px solid #2c3340;
+  border-radius: 8px;
+}
+
+[data-ui="matchday"] .btn {
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+[data-ui="matchday"] .btn.pill,
+[data-ui="matchday"] .btn.callout {
+  border-radius: 8px;
+}
+
+[data-ui="matchday"] .panel-header {
+  border-bottom: 1px solid #232935;
+}
+
+[data-ui="matchday"] .zoom-controls,
+[data-ui="matchday"] .canvas-legend {
+  background: rgba(14, 17, 22, 0.94);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid #2c3340;
 }

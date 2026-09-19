@@ -197,6 +197,15 @@ const cloneSegments = (segments) =>
 
 const cloneTags = (tags) => tags.map((tag) => ({...tag}));
 
+const AUTOSAVE_KEY = "planner_path_v1";
+
+const isTypingTarget = (element) =>
+    Boolean(element) && (
+        element.tagName === "INPUT" ||
+        element.tagName === "TEXTAREA" ||
+        element.tagName === "SELECT" ||
+        element.isContentEditable
+    );
 
 export default function App() {
     const canvasSize = DEFAULT_CANVAS_SIZE;
@@ -222,13 +231,16 @@ export default function App() {
     
     // UI Effects State
     const [themeName, setThemeName] = useState("default");
+    const [uiStyle, setUiStyle] = useState("glass");
     const [blurStrength, setBlurStrength] = useState(16);
     const [panelOpacity, setPanelOpacity] = useState(0.85);
     const [cardOpacity, setCardOpacity] = useState(0.6);
-    const [uiScale, setUiScale] = useState(0.8);
-    
+    const [uiScale, setUiScale] = useState(0.9);
+
+    const [alliance, setAlliance] = useState("red");
+
     // Apply theme settings via hook
-    useTheme({ blurStrength, panelOpacity, cardOpacity, uiScale, palette, themeName });
+    useTheme({ blurStrength, panelOpacity, cardOpacity, uiScale, palette, themeName, uiStyle, alliance });
 
     useEffect(() => {
         const stored = localStorage.getItem("planner_settings");
@@ -242,6 +254,7 @@ export default function App() {
                 if (parsed.robotDimensions) setRobotDimensions({...DEFAULT_ROBOT_DIMENSIONS, ...parsed.robotDimensions});
                 if (parsed.palette) setPalette(parsed.palette);
                 if (parsed.themeName) setThemeName(parsed.themeName);
+                if (parsed.uiStyle === "glass" || parsed.uiStyle === "matchday") setUiStyle(parsed.uiStyle);
                 if (parsed.blurStrength !== undefined) setBlurStrength(parsed.blurStrength);
                 if (parsed.panelOpacity !== undefined) setPanelOpacity(parsed.panelOpacity);
                 if (parsed.cardOpacity !== undefined) setCardOpacity(parsed.cardOpacity);
@@ -260,6 +273,7 @@ export default function App() {
         setRobotDimensions({...DEFAULT_ROBOT_DIMENSIONS, ...settings.robotDimensions});
         setPalette(settings.palette);
         setThemeName(settings.themeName);
+        setUiStyle(settings.uiStyle === "matchday" ? "matchday" : "glass");
         setBlurStrength(settings.blurStrength);
         setPanelOpacity(settings.panelOpacity);
         setCardOpacity(settings.cardOpacity);
@@ -272,6 +286,7 @@ export default function App() {
 
     const [segments, setSegmentsInternal] = useState([]);
     const [undoStack, setUndoStack] = useState([]);
+    const [redoStack, setRedoStack] = useState([]);
 
     // Point editing state
     const [selectedPointIndices, setSelectedPointIndices] = useState([]); // Now an array for multi-selection
@@ -291,7 +306,6 @@ export default function App() {
     const [tagPointIndex, setTagPointIndex] = useState(""); // Index for manual tag placement
     const [showExportModal, setShowExportModal] = useState(false);
 
-    const [alliance, setAlliance] = useState("red");
     const [globalVars, setGlobalVars] = useState([]);
     const [tagValueSource, setTagValueSource] = useState("manual");
     const [tagGlobalName, setTagGlobalName] = useState("");
@@ -321,10 +335,16 @@ export default function App() {
     const [copied, setCopied] = useState(false);
     const [uploadStatus, setUploadStatus] = useState("idle");
     const [runStatus, setRunStatus] = useState("idle");
+    const [lastUpload, setLastUpload] = useState(null);
+    const [importError, setImportError] = useState(null);
+    const [pathRevision, setPathRevision] = useState(0);
+    const pathRevisionRef = useRef(0);
     const uploadTimerRef = useRef(null);
     const runTimerRef = useRef(null);
     const undoRef = useRef(() => {});
+    const redoRef = useRef(() => {});
     const undoSuspendRef = useRef(false);
+    const restoredRef = useRef(false);
 
     const {
         isConnected,
@@ -389,11 +409,6 @@ export default function App() {
         [waypoints, velocity, maxAccel]
     );
 
-    const runProfile = useMemo(
-        () => buildSpeedProfile(waypoints, velocity, maxAccel),
-        [waypoints, velocity, maxAccel]
-    );
-
     const {
         playState,
         playDist: playTime, // seconds
@@ -407,6 +422,46 @@ export default function App() {
     useEffect(() => {
         stopPlayback();
     }, [segments, startPose.x, startPose.y, startPose.h, stopPlayback]);
+
+    // Track path edits so the run panel can tell whether the robot's copy is stale.
+    useEffect(() => {
+        setPathRevision((prev) => {
+            const next = prev + 1;
+            pathRevisionRef.current = next;
+            return next;
+        });
+    }, [segments, tags, startPose, alliance, velocity, tolerance]);
+
+    // Restore the working path after a refresh or crash.
+    useEffect(() => {
+        if (restoredRef.current) return;
+        restoredRef.current = true;
+        try {
+            const stored = localStorage.getItem(AUTOSAVE_KEY);
+            if (!stored) return;
+            const data = JSON.parse(stored);
+            if (Array.isArray(data?.segments) && data.segments.length) {
+                applyImportedData(data);
+            }
+        } catch {
+            localStorage.removeItem(AUTOSAVE_KEY);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // Autosave the working path so a refresh never loses it.
+    useEffect(() => {
+        if (!restoredRef.current) return;
+        const timer = setTimeout(() => {
+            try {
+                localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(buildSerializable()));
+            } catch {
+                // storage unavailable or full; nothing to do
+            }
+        }, 400);
+        return () => clearTimeout(timer);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [segments, tags, startPose, alliance, globalVars, velocity, maxAccel, tolerance, endHeading, headingMode, snapInches]);
 
     useEffect(() => {
         if (!livePose) return;
@@ -479,9 +534,17 @@ export default function App() {
         });
     };
 
+    const selectShape = (type) => {
+        setShapeType(type);
+        setBezierTemp(null);
+        setArcTemp(null);
+        setDrawTemp(null);
+        setPreview(null);
+    };
+
     const clearAll = () => {
+        if (segments.length || tags.length) recordUndoSnapshot(segments);
         setSegments([]);
-        setUndoStack([]);
         setTags([]);
         setBezierTemp(null);
         setArcTemp(null);
@@ -508,20 +571,20 @@ export default function App() {
         }
     };
 
+    const captureSnapshot = useCallback((segmentsSnapshot) => ({
+        type: "snapshot",
+        segments: cloneSegments(segmentsSnapshot ?? segments),
+        tags: cloneTags(tags),
+        startPose: {...startPose},
+        selectedPointIndices: [...selectedPointIndices],
+        expandedPointIndex,
+    }), [segments, tags, startPose, selectedPointIndices, expandedPointIndex]);
+
     const recordUndoSnapshot = useCallback((segmentsSnapshot) => {
         if (undoSuspendRef.current) return;
-        setUndoStack((prev) => [
-            ...prev,
-            {
-                type: "snapshot",
-                segments: cloneSegments(segmentsSnapshot ?? segments),
-                tags: cloneTags(tags),
-                startPose: {...startPose},
-                selectedPointIndices: [...selectedPointIndices],
-                expandedPointIndex,
-            },
-        ]);
-    }, [segments, tags, startPose, selectedPointIndices, expandedPointIndex]);
+        setUndoStack((prev) => [...prev, captureSnapshot(segmentsSnapshot)]);
+        setRedoStack([]);
+    }, [captureSnapshot]);
 
     const beginEditAction = useCallback(() => {
         if (!undoSuspendRef.current) {
@@ -538,6 +601,7 @@ export default function App() {
         if (bezierTemp) { setBezierTemp(null); setPreview(null); return; }
         if (arcTemp)    { setArcTemp(null);    setPreview(null); return; }
         if (undoStack.length === 0) return;
+        setRedoStack((prev) => [...prev, captureSnapshot()]);
         const last = undoStack[undoStack.length - 1];
         if (last?.type === "snapshot") {
             setSegmentsInternal(cloneSegments(last.segments ?? []));
@@ -555,6 +619,7 @@ export default function App() {
         bezierTemp,
         arcTemp,
         undoStack,
+        captureSnapshot,
         setSegments,
         setSegmentsInternal,
         setTags,
@@ -563,20 +628,57 @@ export default function App() {
         setExpandedPointIndex,
     ]);
 
+    const redoLast = useCallback(() => {
+        if (redoStack.length === 0) return;
+        const snap = redoStack[redoStack.length - 1];
+        setUndoStack((prev) => [...prev, captureSnapshot()]);
+        setSegmentsInternal(cloneSegments(snap.segments ?? []));
+        setTags(cloneTags(snap.tags ?? []));
+        if (snap.startPose) setStartPose(snap.startPose);
+        setSelectedPointIndices(snap.selectedPointIndices ?? []);
+        setExpandedPointIndex(snap.expandedPointIndex ?? null);
+        setRedoStack((prev) => prev.slice(0, -1));
+    }, [redoStack, captureSnapshot]);
+
     useEffect(() => { undoRef.current = undoLast; }, [undoLast]);
+    useEffect(() => { redoRef.current = redoLast; }, [redoLast]);
 
     useEffect(() => {
         const handleKeyDown = (event) => {
             const isMac = navigator.platform.toLowerCase().includes("mac");
             const modifier = isMac ? event.metaKey : event.ctrlKey;
-            if (modifier && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "z") {
+            const typing = isTypingTarget(event.target);
+            if (modifier && !event.altKey && event.key.toLowerCase() === "z") {
+                if (typing) return;
                 event.preventDefault();
-                undoRef.current();
+                if (event.shiftKey) redoRef.current();
+                else undoRef.current();
+                return;
             }
+            if (modifier && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "y") {
+                if (typing) return;
+                event.preventDefault();
+                redoRef.current();
+                return;
+            }
+            if (typing || modifier || event.altKey) return;
+            const key = event.key.toLowerCase();
+            if (key === "delete" || key === "backspace") {
+                if (editMode && selectedPointIndices.length) {
+                    event.preventDefault();
+                    deletePoints(selectedPointIndices);
+                }
+                return;
+            }
+            if (key === "l") selectShape("line");
+            else if (key === "d") selectShape("draw");
+            else if (key === "b") selectShape("bezier");
+            else if (key === "a") selectShape("arc");
+            else if (key === "e") toggleEditMode();
         };
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
-    }, []);
+    });
 
     const addTag = () => {
         if (displayPoints.length === 0) return;
@@ -720,20 +822,22 @@ export default function App() {
     }, [startPose, headingMode, endHeadingValue]);
 
     const appendLineSegment = useCallback((x, y) => {
-        setSegments((prev) => {
-            const anchor = prev.length
-                ? prev[prev.length - 1].samples?.[prev[prev.length - 1].samples.length - 1]
-                : {x: num(startPose.x), y: num(startPose.y), h: num(startPose.h)};
-            const seg = buildLineSegment({
-                anchor,
-                end: {x, y},
-                headingMode,
-                endHeading: endHeadingValue,
-            });
-            return [...prev, seg];
+        const anchor = segments.length
+            ? segments[segments.length - 1].samples?.[segments[segments.length - 1].samples.length - 1]
+            : {x: num(startPose.x), y: num(startPose.y), h: num(startPose.h)};
+        // Ignore clicks on top of the current anchor: a zero-length segment
+        // would upload a degenerate waypoint.
+        if (anchor && Math.hypot(x - Number(anchor.x ?? 0), y - Number(anchor.y ?? 0)) < 0.05) return;
+        const seg = buildLineSegment({
+            anchor,
+            end: {x, y},
+            headingMode,
+            endHeading: endHeadingValue,
         });
+        setSegments((prev) => [...prev, seg]);
         setUndoStack((prev) => [...prev, {type: "point", count: 1}]);
-    }, [setSegments, headingMode, endHeadingValue, startPose]);
+        setRedoStack([]);
+    }, [segments, setSegments, headingMode, endHeadingValue, startPose]);
 
     const appendBezierSegment = useCallback((control, end) => {
         setSegments((prev) => {
@@ -750,6 +854,7 @@ export default function App() {
             return [...prev, {...seg, headingMode}];
         });
         setUndoStack((prev) => [...prev, {type: "bezier", count: 1}]);
+        setRedoStack([]);
     }, [setSegments, headingMode, endHeadingValue, startPose]);
 
     const appendArcSegment = useCallback((mid, end) => {
@@ -767,6 +872,7 @@ export default function App() {
             return [...prev, {...seg, headingMode}];
         });
         setUndoStack((prev) => [...prev, {type: "arc", count: 1}]);
+        setRedoStack([]);
     }, [setSegments, headingMode, endHeadingValue, startPose]);
 
     const appendSegmentsFromSamples = useCallback((samples, shapeType = "draw") => {
@@ -789,6 +895,7 @@ export default function App() {
             return next;
         });
         setUndoStack((prev) => [...prev, {type: shapeType, count: samples.length}]);
+        setRedoStack([]);
     }, [setSegments, headingMode, endHeadingValue, startPose]);
 
     // Point editing functions (segment endpoints)
@@ -1060,6 +1167,11 @@ export default function App() {
         if (!pathServerReady) {
             setUploadStatus("fail");
             uploadTimerRef.current = setTimeout(() => setUploadStatus("idle"), UPLOAD_RESET_FAIL_MS);
+            setLastUpload({
+                state: "fail",
+                reason: `${targetOpMode} isn't running the Path Server — pick a compatible OpMode.`,
+                at: Date.now(),
+            });
             const incompatErr = new Error(`${targetOpMode} does not expose a path server`);
             incompatErr.code = "PATH_SERVER_UNAVAILABLE";
             incompatErr.opModeName = targetOpMode;
@@ -1082,6 +1194,14 @@ export default function App() {
                 }
                 setUploadStatus("ok");
                 uploadTimerRef.current = setTimeout(() => setUploadStatus("idle"), UPLOAD_RESET_OK_MS);
+                setLastUpload({
+                    state: "ok",
+                    opMode: targetOpMode,
+                    points: displayPoints.length,
+                    length: totalLength,
+                    at: Date.now(),
+                    revision: pathRevisionRef.current,
+                });
                 return true;
             } catch (error) {
                 lastError = error;
@@ -1092,6 +1212,15 @@ export default function App() {
                 }
                 setUploadStatus("fail");
                 uploadTimerRef.current = setTimeout(() => setUploadStatus("idle"), UPLOAD_RESET_FAIL_MS);
+                setLastUpload({
+                    state: "fail",
+                    reason: isNetworkError(error)
+                        ? "Robot unreachable — check the robot WiFi connection."
+                        : error?.code === "PATH_UPLOAD_HTTP_ERROR"
+                            ? `Robot rejected the upload (HTTP ${error.status}).`
+                            : "Upload failed — see the browser console for details.",
+                    at: Date.now(),
+                });
                 throw error;
             }
         }
@@ -1130,6 +1259,11 @@ export default function App() {
             if (!initOk) {
                 setUploadStatus("fail");
                 uploadTimerRef.current = setTimeout(() => setUploadStatus("idle"), UPLOAD_RESET_FAIL_MS);
+                setLastUpload({
+                    state: "fail",
+                    reason: `${targetOpMode} never initialized — is the robot on and connected?`,
+                    at: Date.now(),
+                });
                 return;
             }
 
@@ -1250,10 +1384,7 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
         URL.revokeObjectURL(url);
     };
 
-    const onImportPath = async (file) => {
-        try {
-            const text = await file.text();
-            const data = JSON.parse(text);
+    const applyImportedData = (data) => {
             const getNum = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
             const computeEndIndices = (segmentsList) => {
                 let cursor = -1;
@@ -1377,11 +1508,20 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
             setArcTemp(null);
             setPreview(null);
             setUndoStack([]);
+            setRedoStack([]);
             setPlaceStart(false);
             stopPlayback();
+    };
+
+    const onImportPath = async (file) => {
+        try {
+            const text = await file.text();
+            const data = JSON.parse(text);
+            applyImportedData(data);
+            setImportError(null);
         } catch (err) {
             console.error("Failed to import path:", err);
-            alert("Could not import file. Make sure it's a valid path JSON.");
+            setImportError(`"${file?.name ?? "That file"}" isn't a valid path JSON — export a path from the planner to see the expected format.`);
         }
     };
 
@@ -1395,43 +1535,59 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
         setPlayTime(0); // reset "time"
     };
 
-    const estRunTimeSeconds = runProfile.totalTime;
+    const estRunTimeSeconds = previewProfile.totalTime;
+
+    const setupInitialSettings = useMemo(() => ({
+        fieldSize,
+        showGrid,
+        gridStep,
+        gridStepEntry,
+        robotDimensions,
+        palette,
+        themeName,
+        uiStyle,
+        blurStrength,
+        panelOpacity,
+        cardOpacity,
+        uiScale,
+    }), [fieldSize, showGrid, gridStep, gridStepEntry, robotDimensions, palette, themeName, uiStyle, blurStrength, panelOpacity, cardOpacity, uiScale]);
+
+    const exportDefaultName = `${alliance}_path_${new Date().toISOString().slice(0, 10)}`;
 
     return (
         <div className="app-scale">
+        <div className={`app-root${uiStyle === "matchday" ? " matchday" : ""}`}>
         <SetupModal
             isOpen={showSetupModal}
             onClose={() => setShowSetupModal(false)}
             onSave={handleSaveSettings}
-            initialSettings={{ 
-                fieldSize, 
-                showGrid,
-                gridStep,
-                gridStepEntry,
-                robotDimensions,
-                palette,
-                themeName,
-                blurStrength,
-                panelOpacity,
-                cardOpacity,
-                uiScale
-            }}
+            initialSettings={setupInitialSettings}
         />
         <ExportModal
             isOpen={showExportModal}
             onClose={() => setShowExportModal(false)}
             onExport={handleExportWithName}
+            defaultName={exportDefaultName}
         />
+        {uiStyle === "matchday" && (
+            <header className="matchday-bar">
+                <div className="mb-brand">
+                    <strong>Overlake 16965</strong>
+                    <span>PathPlanner</span>
+                </div>
+                <div className="mb-status">
+                    <span className={`mb-chip mb-alliance ${alliance}`}>{alliance === "blue" ? "Blue" : "Red"} alliance</span>
+                    <span className={`mb-chip mb-conn ${isConnected ? "on" : "off"}`}>
+                        {isConnected ? "Robot linked" : "No robot"}
+                    </span>
+                    <span className="mb-chip mb-path">{displayPoints.length} pts · {toFixed(totalLength, 0)} in</span>
+                </div>
+            </header>
+        )}
         <div className="app-shell" ref={layoutRef} style={shellStyle}>
             <BuildPanel
                 shapeType={shapeType}
-                setShapeType={(type) => {
-                    setShapeType(type);
-                    setBezierTemp(null);
-                    setArcTemp(null);
-                    setDrawTemp(null);
-                    setPreview(null);
-                }}
+                setShapeType={selectShape}
                 drawMode={drawMode}
                 setDrawMode={setDrawMode}
                 headingMode={headingMode}
@@ -1570,7 +1726,15 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                 playDist={playDist}
                 code={code}
                 onUndo={undoLast}
+                onRedo={redoLast}
+                canUndo={undoStack.length > 0 || Boolean(bezierTemp) || Boolean(arcTemp)}
+                canRedo={redoStack.length > 0}
                 onClear={clearAll}
+                lastUpload={lastUpload}
+                onDismissUpload={() => setLastUpload(null)}
+                pathDirty={Boolean(lastUpload?.state === "ok" && lastUpload.revision !== pathRevision)}
+                importError={importError}
+                onDismissImportError={() => setImportError(null)}
                 tags={tags}
                 onRemoveTag={removeTag}
                 onEditTag={editTag}
@@ -1603,6 +1767,7 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                 onStart={sendStart}
                 onStopOpMode={sendStop}
             />
+        </div>
         </div>
         </div>
     );

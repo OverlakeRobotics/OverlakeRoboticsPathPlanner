@@ -18,6 +18,13 @@ const runClass = (status) =>
                 ? "btn run-sending"
                 : "btn run";
 
+const OP_MODE_STOP_SENTINEL = "$Stop$Robot$";
+
+const displayOpMode = (name) => (!name || name === OP_MODE_STOP_SENTINEL ? "None (stopped)" : name);
+
+const formatClock = (timestamp) =>
+    new Date(timestamp).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+
 export default function RunPanel({
                                      onUpload,
                                      onRun,
@@ -34,7 +41,15 @@ export default function RunPanel({
                                      playDist,
                                      code,
                                      onUndo,
+                                     onRedo,
+                                     canUndo,
+                                     canRedo,
                                      onClear,
+                                     lastUpload,
+                                     onDismissUpload,
+                                     pathDirty,
+                                     importError,
+                                     onDismissImportError,
                                      tags,
                                      onRemoveTag,
                                      onEditTag,
@@ -69,10 +84,6 @@ export default function RunPanel({
                                      onUpdateSegmentMid,
                                      onUpdateSegmentHeadingMode,
                                  }) {
-    useEffect(() => {
-        console.log('[RunPanel] Rendered. isConnected:', isConnected, 'robotStatus:', robotStatus, 'disabled:', robotStatus?.status === 'RUNNING');
-    }, [isConnected, robotStatus, onInit]);
-
     const lengthDisplay = toFixed(totalLength, 1);
     const timeDisplay = Number.isFinite(estTimeSec) ? toFixed(estTimeSec, 1) : "0.0";
     const progress = totalLength > 0 ? Math.round((playDist / totalLength) * 100) : 0;
@@ -324,8 +335,9 @@ export default function RunPanel({
     }, [selectedOpMode]);
 
     const handleUploadClick = async () => {
+        if (!isConnected) return;
         if (!selectedOpMode) {
-            setDebugMsg('Select an OpMode before initializing/uploading.');
+            setDebugMsg('Select an OpMode before uploading.');
             return;
         }
 
@@ -333,26 +345,26 @@ export default function RunPanel({
         const waitFn = typeof waitForOpMode === 'function' ? waitForOpMode : fallbackWaitForOpMode;
         const performUpload = async () => {
             if (onUpload) await onUpload(selectedOpMode);
-            setDebugMsg('Upload requested');
         };
 
         try {
             const currentOpMode = String(robotStatusRef.current?.opMode || '');
             const currentStatus = robotStatusRef.current?.status || '';
             if (currentOpMode.toLowerCase().includes(String(selectedOpMode).toLowerCase()) && currentStatus !== 'STOPPED') {
-                setDebugMsg('Already initialized, uploading...');
+                setDebugMsg(`Uploading to ${selectedOpMode}…`);
                 await performUpload();
                 setHasSentInit(true);
+                setDebugMsg("");
                 return;
             }
 
-            setDebugMsg(`Initializing ${selectedOpMode}...`);
+            setDebugMsg(`Initializing ${selectedOpMode}…`);
             setHasSentInit(true);
 
             // Prefer the App-level instant init+upload orchestration if available
             if (typeof onInstantUploadInit === 'function') {
                 await onInstantUploadInit(selectedOpMode);
-                // onInstantUploadInit handles upload, so we're done
+                setDebugMsg("");
                 return;
             }
 
@@ -361,36 +373,32 @@ export default function RunPanel({
 
             await waitFn(selectedOpMode);
 
-            setDebugMsg('Initialized! Uploading path...');
+            setDebugMsg(`Uploading to ${selectedOpMode}…`);
             await new Promise((resolve) => setTimeout(resolve, 500));
 
             await performUpload();
+            setDebugMsg("");
         } catch (e) {
             console.error(e);
             setHasSentInit(false);
+            setDebugMsg("");
             if (e?.code === 'PATH_SERVER_UNAVAILABLE') {
                 const incompatibleName = e?.opModeName || selectedOpMode;
                 showOpModeWarning(`${incompatibleName} is not running the Path Server. Please select a compatible OpMode.`);
-                setDebugMsg('OpMode incompatible');
-            } else {
-                setDebugMsg('Init/Upload failed or timed out');
             }
         }
     };
-    
+
     const handleInitStartClick = () => {
-        console.log(`[RunPanel] Init/Start Clicked. initialized: ${initialized}, hasSentInit: ${hasSentInit}`);
         if (!initialized && !hasSentInit) {
-            console.log(`[RunPanel] Sending INIT with selectedOpMode: ${selectedOpMode}`);
-            setDebugMsg(`Sending INIT (${selectedOpMode})...`);
+            setDebugMsg(`Sending INIT (${selectedOpMode})…`);
             if (onInit) onInit(selectedOpMode);
             setHasSentInit(true);
-            setTimeout(() => setDebugMsg('Initialized (local)'), 600);
+            setTimeout(() => setDebugMsg(""), 1500);
         } else {
-            console.log('[RunPanel] Sending START');
-            setDebugMsg('Starting path...');
+            setDebugMsg("Starting…");
             if (onStart) onStart();
-            setTimeout(() => setDebugMsg('Start requested'), 600);
+            setTimeout(() => setDebugMsg(""), 1500);
         }
     };
 
@@ -400,10 +408,10 @@ export default function RunPanel({
                 <h2>Run & Export</h2>
             </div>
             <div className="panel-body scroll-area">
-                <section className="control-card">
+                <section className="control-card run-primary">
                     <div className="card-header">
                         <h3>Robot Control</h3>
-                        <p>Manage robot connection and execution.</p>
+                        <p>Upload the path, then init and start the OpMode.</p>
                     </div>
                     <div className="card-actions stack">
                         {/* Primary Upload (INIT then Upload) */}
@@ -424,13 +432,34 @@ export default function RunPanel({
                                 {opModeWarning}
                             </div>
                         )}
-                        <button 
-                            className={uploadClass(uploadStatus)} 
+                        <button
+                            className={`${uploadClass(uploadStatus)} btn-lg`}
                             onClick={handleUploadClick}
-                            disabled={uploadStatus === "sending"}
+                            disabled={uploadStatus === "sending" || !isConnected || pointsCount === 0}
+                            title={!isConnected
+                                ? "Connect to the robot WiFi first"
+                                : pointsCount === 0
+                                    ? "Place at least one point on the field first"
+                                    : undefined}
                         >
-                            {uploadStatus === "sending" ? "Uploading..." : "Upload"}
+                            {uploadLabel(uploadStatus)}
                         </button>
+
+                        {lastUpload?.state === "ok" && (
+                            <div className="status-line ok" role="status">
+                                <span>
+                                    ✓ {lastUpload.points} pts · {toFixed(lastUpload.length, 0)} in → {lastUpload.opMode} at {formatClock(lastUpload.at)}
+                                    {pathDirty && <em className="status-stale"> — path edited since upload</em>}
+                                </span>
+                                <button className="status-dismiss" onClick={onDismissUpload} aria-label="Dismiss upload status">×</button>
+                            </div>
+                        )}
+                        {lastUpload?.state === "fail" && (
+                            <div className="status-line fail" role="alert">
+                                <span>Upload failed: {lastUpload.reason}</span>
+                                <button className="status-dismiss" onClick={onDismissUpload} aria-label="Dismiss upload error">×</button>
+                            </div>
+                        )}
 
                         {/* Connection & Robot Status */}
                         <div className="robot-status-panel" style={{
@@ -448,11 +477,11 @@ export default function RunPanel({
                             )}
                             <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem'}}>
                                 <div style={{
-                                    width: '8px', 
-                                    height: '8px', 
-                                    borderRadius: '50%', 
+                                    width: '9px',
+                                    height: '9px',
+                                    borderRadius: '50%',
                                     background: isConnected ? '#4ade80' : '#f87171',
-                                    boxShadow: isConnected ? '0 0 8px #4ade80' : 'none'
+                                    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.5)'
                                 }} />
                                 <span style={{fontSize: '0.9rem', fontWeight: 500}}>
                                     {isConnected ? "Connected to Robot" : "Disconnected"}
@@ -463,7 +492,7 @@ export default function RunPanel({
                                 <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.8rem'}}>
                                     <div>
                                         <span style={{opacity: 0.7}}>OpMode:</span>
-                                        <div style={{fontWeight: 600}}>{robotStatus.opMode}</div>
+                                        <div style={{fontWeight: 600}}>{displayOpMode(robotStatus.opMode)}</div>
                                     </div>
                                     <div>
                                         <span style={{opacity: 0.7}}>Battery:</span>
@@ -488,11 +517,11 @@ export default function RunPanel({
                                                         onClick={() => setSelectedOpMode(m)}
                                                         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setSelectedOpMode(m); }}
                                                         style={{
-                                                            padding: '0.4rem',
-                                                            borderRadius: 4,
+                                                            padding: '0.5rem 0.75rem',
+                                                            borderRadius: 6,
                                                             cursor: 'pointer',
                                                             background: selectedOpMode === m ? 'rgba(16,185,129,0.12)' : 'transparent',
-                                                            border: selectedOpMode === m ? '1px solid rgba(16,185,129,0.12)' : '1px solid transparent',
+                                                            border: selectedOpMode === m ? '1px solid rgba(16,185,129,0.3)' : '1px solid transparent',
                                                             marginBottom: 4,
                                                         }}
                                                     >
@@ -528,34 +557,6 @@ export default function RunPanel({
                             </p>
                         )}
 
-                        <div className="divider" style={{height: '1px', background: 'rgba(255,255,255,0.1)', margin: '0.5rem 0'}} />
-                        
-                        <button className="btn ghost" onClick={onCopy}>
-                            {copied ? "Copied!" : "Copy Code to Clipboard"}
-                        </button>
-                    </div>
-                </section>
-
-                <section className="control-card">
-                    <div className="card-header">
-                        <h3>Import / Export</h3>
-                        <p>Save or import path.</p>
-                    </div>
-                    <div className="card-actions stack">
-                        <button className="btn primary" onClick={onExportPath}>
-                            Export JSON
-                        </button>
-                        <input
-                            ref={fileInputRef}
-                            type="file"
-                            accept="application/json,.json"
-                            className="input"
-                            onChange={(e) => {
-                                const f = e.target.files?.[0];
-                                if (f) onImportFile(f);
-                                e.currentTarget.value = "";
-                            }}
-                        />
                     </div>
                 </section>
 
@@ -569,7 +570,7 @@ export default function RunPanel({
                             {playState === "playing" ? "Pause preview" : "Play preview"}
                         </button>
                         <button className="btn ghost" onClick={onStop}>
-                            Stop
+                            Reset preview
                         </button>
                     </div>
                     <div className="stat-grid">
@@ -1383,25 +1384,46 @@ export default function RunPanel({
 
                 <section className="control-card">
                     <div className="card-header">
-                        <h3>Manage Path</h3>
-                        <p>Undo or clear points.</p>
+                        <h3>Path Actions</h3>
+                        <p>Save, share, and manage the working path.</p>
                     </div>
                     <div className="card-actions stack">
-                        <button className="btn ghost" onClick={onUndo}>
-                            Undo last
-                        </button>
-                        <button className="btn danger" onClick={onClear}>
-                            Clear path
-                        </button>
-                    </div>
-                </section>
-
-                <section className="control-card">
-                    <div className="card-header">
-                        <h3>Switch Sides</h3>
-                        <p>Mirror path between Red and Blue Alliance.</p>
-                    </div>
-                    <div className="card-actions stack">
+                        {importError && (
+                            <div className="status-line fail" role="alert">
+                                <span>{importError}</span>
+                                <button className="status-dismiss" onClick={onDismissImportError} aria-label="Dismiss import error">×</button>
+                            </div>
+                        )}
+                        <div className="action-grid">
+                            <button className="btn ghost" onClick={onExportPath}>
+                                Export JSON
+                            </button>
+                            <button className="btn ghost" onClick={() => fileInputRef.current?.click()}>
+                                Import JSON
+                            </button>
+                            <button className="btn ghost" onClick={onCopy}>
+                                {copied ? "Copied!" : "Copy Java code"}
+                            </button>
+                            <button
+                                className="btn ghost"
+                                onClick={onSwitchSides}
+                                disabled={pointsCount === 0}
+                                title="Mirror all points across the field and flip the alliance"
+                            >
+                                Switch sides
+                            </button>
+                        </div>
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept="application/json,.json"
+                            style={{display: "none"}}
+                            onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                if (f) onImportFile(f);
+                                e.currentTarget.value = "";
+                            }}
+                        />
                         <div className="field">
                             <label>Alliance</label>
                             <select
@@ -1412,15 +1434,19 @@ export default function RunPanel({
                                 <option value="blue">Blue</option>
                             </select>
                         </div>
-                        <button 
-                            className="btn callout secondary" 
-                            onClick={onSwitchSides}
-                            disabled={pointsCount === 0}
-                        >
-                            Switch Sides
+                        <div className="action-grid">
+                            <button className="btn ghost" onClick={onUndo} disabled={!canUndo} title="Undo (Cmd/Ctrl+Z)">
+                                Undo
+                            </button>
+                            <button className="btn ghost" onClick={onRedo} disabled={!canRedo} title="Redo (Cmd/Ctrl+Shift+Z)">
+                                Redo
+                            </button>
+                        </div>
+                        <button className="btn ghost danger-text" onClick={onClear} disabled={pointsCount === 0}>
+                            Clear path
                         </button>
                         <p className="helper-text">
-                            Mirrors all points and toggles the alliance parameter.
+                            Clear is undoable — Cmd/Ctrl+Z brings the path back.
                         </p>
                     </div>
                 </section>

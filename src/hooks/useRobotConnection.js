@@ -149,7 +149,6 @@ export function useRobotConnection(hubIp) {
     }, [isConnected]);
 
     const sendInit = useCallback(async (opModeName) => {
-        console.log('[useRobotConnection] sendInit called with:', opModeName);
         try {
             const res = await socketRef.current?.sendInit(opModeName);
             // After sending INIT, request an immediate status so waiters see the change quickly

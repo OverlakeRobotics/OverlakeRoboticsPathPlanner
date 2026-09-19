@@ -4,12 +4,16 @@ import { THEME_PRESETS } from "../constants/themes";
 export function useTheme(settings) {
     useEffect(() => {
         const root = document.documentElement;
-        
+
         // Apply UI Effects
         root.style.setProperty('--blur-strength', `${settings.blurStrength}px`);
         root.style.setProperty('--panel-opacity', settings.panelOpacity);
         root.style.setProperty('--card-opacity', settings.cardOpacity);
         root.style.setProperty('--scale-factor', settings.uiScale);
+
+        // Interface style (glass | matchday) and alliance ambient color
+        root.dataset.ui = settings.uiStyle === 'matchday' ? 'matchday' : 'glass';
+        root.style.setProperty('--alliance', settings.alliance === 'blue' ? '#3b82f6' : '#ef4444');
         
         // Determine colors
         // Start with default theme colors

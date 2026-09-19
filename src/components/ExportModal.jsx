@@ -1,12 +1,16 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
-export default function ExportModal({ isOpen, onClose, onExport }) {
-  const [fileName, setFileName] = useState(`ftc_path_${Date.now()}`);
+export default function ExportModal({ isOpen, onClose, onExport, defaultName = "ftc_path" }) {
+  const [fileName, setFileName] = useState(defaultName);
+
+  useEffect(() => {
+    if (isOpen) setFileName(defaultName);
+  }, [isOpen, defaultName]);
 
   if (!isOpen) return null;
 
   const handleExport = () => {
-    const cleanedName = (fileName.trim() || `ftc_path_${Date.now()}`).replace(/\.json$/i, '');
+    const cleanedName = (fileName.trim() || defaultName).replace(/\.json$/i, '');
     onExport(cleanedName);
     onClose();
   };

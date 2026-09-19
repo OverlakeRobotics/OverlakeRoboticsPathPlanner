@@ -35,6 +35,10 @@ export const usePosePolling = ({enabled = true, interval = POSE_POLL_INTERVAL_MS
         let cancelled = false;
         const minInterval = clampInterval(interval);
         const fetchTimeoutMs = Math.max(120, Math.round(minInterval * 1.5));
+        // While the robot has no pose to report (idle, 503, unreachable) back
+        // off to 1s polls instead of hammering ~30 req/s and flooding the console.
+        const FAILURE_BACKOFF_MS = 1000;
+        let lastPollFailed = false;
 
         const pollContinuously = async () => {
             while (!cancelled) {
@@ -45,6 +49,7 @@ export const usePosePolling = ({enabled = true, interval = POSE_POLL_INTERVAL_MS
 
                 try {
                     const res = await fetch(hubUrl, {cache: "no-store", signal: controller.signal});
+                    lastPollFailed = !res.ok;
                     if (res.ok) {
                         const json = await res.json();
                         if (!cancelled && (json?.ok || hasPoseData(json))) {
@@ -68,11 +73,13 @@ export const usePosePolling = ({enabled = true, interval = POSE_POLL_INTERVAL_MS
                     }
                 } catch {
                     // swallow network errors; planner keeps using last known pose
+                    lastPollFailed = true;
                 } finally {
                     clearTimeout(abortTimeout);
                     if (controllerRef.current === controller) controllerRef.current = null;
                     const elapsed = performance.now() - start;
-                    const remaining = minInterval - elapsed;
+                    const targetInterval = lastPollFailed ? Math.max(minInterval, FAILURE_BACKOFF_MS) : minInterval;
+                    const remaining = targetInterval - elapsed;
                     if (remaining > 0) {
                         await delay(remaining);
                     }

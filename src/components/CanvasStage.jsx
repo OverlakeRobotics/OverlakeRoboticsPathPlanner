@@ -422,10 +422,18 @@ export default function CanvasStage({
         <div className="canvas-frame" ref={containerRef}>
             {/* Zoom Controls */}
             <div className="zoom-controls">
-                <button className="zoom-btn" onClick={zoomIn} title="Zoom In">+</button>
+                <button className="zoom-btn" onClick={zoomIn} title="Zoom in" aria-label="Zoom in">+</button>
                 <span className="zoom-level">{Math.round(zoom * 100)}%</span>
-                <button className="zoom-btn" onClick={zoomOut} title="Zoom Out">-</button>
-                <button className="zoom-btn reset" onClick={resetView} title="Reset View">⟲</button>
+                <button className="zoom-btn" onClick={zoomOut} title="Zoom out" aria-label="Zoom out">-</button>
+                <button className="zoom-btn reset" onClick={resetView} title="Reset zoom to 100%" aria-label="Reset zoom to 100%">⟲</button>
+                <span className="zoom-hint">Scroll = zoom · Alt+drag = pan</span>
+            </div>
+            <div className="canvas-legend" aria-label="Field color legend">
+                <span><i style={{background: palette?.start}} />Start</span>
+                <span><i style={{background: palette?.waypoint}} />Waypoint</span>
+                <span><i style={{background: palette?.path}} />Path</span>
+                <span><i style={{background: palette?.footprint}} />Robot</span>
+                <span><i style={{background: palette?.livePose}} />Live robot</span>
             </div>
             <div 
                 className="canvas-stack" 

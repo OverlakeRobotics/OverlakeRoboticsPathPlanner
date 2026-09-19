@@ -221,11 +221,24 @@ export const applyRuntimeConfig = (overrides = {}) => {
     return merged;
 };
 
+// URL query overrides, e.g. ?hub=127.0.0.1 to target a mock robot
+// (tools/mock-robot.mjs) or a hub on a non-default address.
+export const getQueryOverrides = () => {
+    if (typeof window === "undefined") return null;
+    const params = new URLSearchParams(window.location.search);
+    const overrides = {};
+    const hub = params.get("hub");
+    if (hub) overrides.HUB_IP = hub;
+    return Object.keys(overrides).length > 0 ? overrides : null;
+};
+
 export const loadRuntimeConfig = async () => {
     const inline = getInlineConfig();
-    if (inline) {
-        applyRuntimeConfig(inline);
-        return inline;
+    const query = getQueryOverrides();
+    if (inline || query) {
+        const merged = { ...(inline ?? {}), ...(query ?? {}) };
+        applyRuntimeConfig(merged);
+        return merged;
     }
     return DEFAULT_CONFIG;
 };
