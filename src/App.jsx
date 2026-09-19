@@ -36,7 +36,7 @@ import {usePosePolling} from "./hooks/usePosePolling";
 import {usePlayback} from "./hooks/usePlayback";
 import {useTheme} from "./hooks/useTheme";
 import {useRobotConnection} from "./hooks/useRobotConnection";
-import {clamp, num, normDeg, toFixed} from "./utils/math";
+import {clamp, num, normDeg, shortestDeltaDeg, toFixed} from "./utils/math";
 import {polylineLength} from "./utils/path";
 import {buildArcSegment, buildBezierSegment, buildLineSegment, normalizeHeadingMode} from "./utils/segments";
 import {getFieldImageSrc, resolveFieldImageKey} from "./constants/fieldImages";
@@ -77,20 +77,27 @@ function wrapAngleRad(a) {
     return x;
 }
 
-function buildSpeedProfile(waypoints, vmax_in_s, a_max_in_s2) {
-    const vmax = Math.max(EPS, Number(vmax_in_s) || 0);
-    const amax = Math.max(EPS, Number(a_max_in_s2) || 0);
+// Slowest cruise the preview will model. A 0% velocity tag would otherwise
+// make the estimate infinite.
+const PREVIEW_MIN_SPEED_IN_S = 1;
+
+const EMPTY_PROFILE = {s: [0], v: [0], t: [0], totalLen: 0, totalTime: 0, sOfT: () => 0};
+
+// Trapezoidal speed profile over the sampled path. Every waypoint edge has its
+// own cruise cap (robot max speed scaled by the velocity tag in effect for its
+// segment and by how much of the motion is a strafe), curvature limits speed
+// through turns, and the forward/backward passes use the robot's acceleration
+// and deceleration limits. The robot starts and ends at rest.
+function buildSpeedProfile(waypoints, {edgeCruise = [], fallbackCruise, accel, decel} = {}) {
+    const amax = Math.max(EPS, Number(accel) || 0);
+    const dmax = Math.max(EPS, Number(decel) || amax);
+    const fallback = Math.max(PREVIEW_MIN_SPEED_IN_S, Number(fallbackCruise) || 0);
+    const cruiseFor = (edge) => {
+        const cap = Number(edgeCruise[edge]);
+        return Number.isFinite(cap) && cap > 0 ? Math.max(PREVIEW_MIN_SPEED_IN_S, cap) : fallback;
+    };
     const N = waypoints.length;
-    if (N < 2) {
-        return {
-            s: [0],
-            v: [0],
-            t: [0],
-            totalLen: 0,
-            totalTime: 0,
-            sOfT: () => 0,
-        };
-    }
+    if (N < 2) return EMPTY_PROFILE;
 
     const segLen = [];
     const segDir = [];
@@ -103,28 +110,20 @@ function buildSpeedProfile(waypoints, vmax_in_s, a_max_in_s2) {
         segDir.push(Math.atan2(dy, dx));
         totalLen += L;
     }
-    if (totalLen < EPS) {
-        return {
-            s: [0],
-            v: [0],
-            t: [0],
-            totalLen: 0,
-            totalTime: 0,
-            sOfT: () => 0,
-        };
-    }
+    if (totalLen < EPS) return EMPTY_PROFILE;
 
     const kappaVertex = new Array(N).fill(0);
     for (let i = 1; i < N - 1; i++) {
-        const d1 = segDir[i - 1];
-        const d2 = segDir[i];
-        const turn = Math.abs(wrapAngleRad(d2 - d1));
+        const turn = Math.abs(wrapAngleRad(segDir[i] - segDir[i - 1]));
         const dsLocal = Math.max(EPS, 0.5 * (segLen[i - 1] + segLen[i]));
         kappaVertex[i] = turn / dsLocal;
     }
 
+    // Resample along arc length, remembering which edge each sample is on so
+    // it picks up that edge's cruise cap.
     const s = [0];
     const kappa = [kappaVertex[0]];
+    const edgeOf = [0];
     let accS = 0;
     for (let i = 0; i < N - 1; i++) {
         const L = segLen[i];
@@ -132,32 +131,30 @@ function buildSpeedProfile(waypoints, vmax_in_s, a_max_in_s2) {
         const steps = Math.max(1, Math.round(L / SPEED_PROFILE_SAMPLE_STEP_IN));
         for (let j = 1; j <= steps; j++) {
             const alpha = j / steps;
-            const sHere = accS + alpha * L;
-            const k = (1 - alpha) * kappaVertex[i] + alpha * kappaVertex[i + 1];
-            s.push(sHere);
-            kappa.push(k);
+            s.push(accS + alpha * L);
+            kappa.push((1 - alpha) * kappaVertex[i] + alpha * kappaVertex[i + 1]);
+            edgeOf.push(i);
         }
         accS += L;
     }
     const M = s.length;
 
-    const vCurve = new Array(M);
+    const v = new Array(M);
     for (let i = 0; i < M; i++) {
         const k = Math.abs(kappa[i]);
-        if (k < 1e-8) vCurve[i] = Infinity;
-        else vCurve[i] = Math.sqrt(Math.max(EPS, amax / k));
+        const vCurve = k < 1e-8 ? Infinity : Math.sqrt(Math.max(EPS, amax / k));
+        v[i] = Math.min(cruiseFor(edgeOf[i]), vCurve);
     }
-
-    const v = vCurve.map((vc) => Math.min(vmax, vc));
+    v[0] = 0;
+    v[M - 1] = 0;
 
     for (let i = 1; i < M; i++) {
         const ds = s[i] - s[i - 1];
         v[i] = Math.min(v[i], Math.sqrt(v[i - 1] * v[i - 1] + 2 * amax * ds));
     }
-
     for (let i = M - 2; i >= 0; i--) {
         const ds = s[i + 1] - s[i];
-        v[i] = Math.min(v[i], Math.sqrt(v[i + 1] * v[i + 1] + 2 * amax * ds));
+        v[i] = Math.min(v[i], Math.sqrt(v[i + 1] * v[i + 1] + 2 * dmax * ds));
     }
 
     const t = new Array(M).fill(0);
@@ -171,7 +168,6 @@ function buildSpeedProfile(waypoints, vmax_in_s, a_max_in_s2) {
     function sOfT(time) {
         if (time <= 0) return 0;
         if (time >= totalTime) return totalLen;
-        // binary search in t[]
         let lo = 0, hi = M - 1;
         while (hi - lo > 1) {
             const mid = (lo + hi) >> 1;
@@ -196,6 +192,47 @@ const cloneSegments = (segments) =>
     }));
 
 const cloneTags = (tags) => tags.map((tag) => ({...tag}));
+
+const resolveTagValueWith = (tag, globalVars) => {
+    if (tag?.globalName) {
+        const match = globalVars.find((entry) => entry.name === tag.globalName);
+        const resolved = Number(match?.value);
+        if (Number.isFinite(resolved)) return resolved;
+    }
+    return Number(tag?.value) || 0;
+};
+
+// Tags are stored with a 1-based display-point index (0 = start pose). The
+// "segment" a tag belongs to is the 0-based index of the segment whose end
+// point it sits at; a start-pose tag is -1.
+const tagSegmentIndex = (tagIndex, segmentCount) => {
+    const parsed = Number(tagIndex);
+    if (!Number.isFinite(parsed) || parsed <= 0 || segmentCount <= 0) return -1;
+    return Math.min(segmentCount, Math.trunc(parsed)) - 1;
+};
+
+// "velocity" tag value -> percent of max speed, using the robot's rule:
+// values above 1 are already percent, 0-1 is a legacy fraction.
+const velocityTagPercent = (value) => {
+    const n = Number(value) || 0;
+    return clamp(n > 1 ? n : n * 100, 0, 100);
+};
+
+// Motion limits reported by the robot in GET /config (and echoed on POST
+// /points) as {robot: {maxSpeedInS, maxStrafeSpeedInS, maxDecelInS2, maxAccelInS2|null}}.
+const parseRobotLimits = (body) => {
+    const raw = body?.robot;
+    if (!raw || typeof raw !== "object") return null;
+    const positive = (value) => (Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : null);
+    const maxSpeedInS = positive(raw.maxSpeedInS);
+    if (!maxSpeedInS) return null;
+    return {
+        maxSpeedInS,
+        maxStrafeSpeedInS: positive(raw.maxStrafeSpeedInS) ?? maxSpeedInS,
+        maxDecelInS2: positive(raw.maxDecelInS2),
+        maxAccelInS2: positive(raw.maxAccelInS2),
+    };
+};
 
 const AUTOSAVE_KEY = "planner_path_v1";
 const PATH_FILE_VERSION = 2;
@@ -280,6 +317,8 @@ export default function App() {
                 const parsed = JSON.parse(stored);
                 if (parsed.fieldSize) setFieldSize(parsed.fieldSize);
                 if (parsed.fieldImage) setFieldImage(resolveFieldImageKey(parsed.fieldImage, DEFAULT_FIELD_IMAGE));
+                if (Number(parsed.previewMaxSpeed) > 0) setPreviewMaxSpeed(String(Number(parsed.previewMaxSpeed)));
+                if (Number(parsed.previewMaxAccel) > 0) setPreviewMaxAccel(String(Number(parsed.previewMaxAccel)));
                 if (parsed.showGrid !== undefined) setShowGrid(Boolean(parsed.showGrid));
                 if (Number.isFinite(Number(parsed.gridStep))) setGridStep(Number(parsed.gridStep));
                 if (parsed.gridStepEntry !== undefined) setGridStepEntry(String(parsed.gridStepEntry));
@@ -300,6 +339,8 @@ export default function App() {
     const handleSaveSettings = (settings) => {
         setFieldSize(settings.fieldSize);
         setFieldImage(resolveFieldImageKey(settings.fieldImage, DEFAULT_FIELD_IMAGE));
+        if (Number(settings.previewMaxSpeed) > 0) setPreviewMaxSpeed(String(Number(settings.previewMaxSpeed)));
+        if (Number(settings.previewMaxAccel) > 0) setPreviewMaxAccel(String(Number(settings.previewMaxAccel)));
         setShowGrid(Boolean(settings.showGrid));
         setGridStep(Number(settings.gridStep) || GRID_DEFAULT_STEP);
         setGridStepEntry(settings.gridStepEntry ?? String(settings.gridStep ?? GRID_DEFAULT_STEP));
@@ -349,10 +390,12 @@ export default function App() {
     const [headingMode, setHeadingMode] = useState("straight");
     const [endHeading, setEndHeading] = useState(String(0));
 
-    // Preview-only motion model for the playback ghost and time estimate.
-    // Neither value is uploaded: the follower on the robot owns its speed.
-    const [previewSpeed, setPreviewSpeed] = useState(String(DEFAULT_PLAYBACK_SPEED_IN_PER_S));
-    const [maxAccel, setMaxAccel] = useState(String(DEFAULT_MAX_ACCEL_IN_PER_S2));
+    // Playback estimate inputs. The robot's own limits (from GET /config) win;
+    // these Setup values are only the fallback when the robot is not connected.
+    // Nothing here is uploaded or exported.
+    const [previewMaxSpeed, setPreviewMaxSpeed] = useState(String(DEFAULT_PLAYBACK_SPEED_IN_PER_S));
+    const [previewMaxAccel, setPreviewMaxAccel] = useState(String(DEFAULT_MAX_ACCEL_IN_PER_S2));
+    const [robotLimits, setRobotLimits] = useState(null);
     const [snapInches, setSnapInches] = useState(String(DEFAULT_SNAP_IN));
 
     const [robotDimensions, setRobotDimensions] = useState({...DEFAULT_ROBOT_DIMENSIONS});
@@ -392,6 +435,33 @@ export default function App() {
         checkPathServer
     } = useRobotConnection(HUB_IP);
     const robotState = robotStatus?.activeOpModeStatus || null;
+
+    const robotLimitsSeqRef = useRef(0);
+    const fetchRobotLimits = useCallback(async () => {
+        const seq = ++robotLimitsSeqRef.current;
+        try {
+            const response = await fetchWithTimeout(`http://${HUB_IP}:8099/config`, {cache: "no-store"}, 2500);
+            if (!response.ok) return null;
+            const body = await response.json().catch(() => null);
+            const limits = parseRobotLimits(body);
+            if (limits && seq === robotLimitsSeqRef.current) setRobotLimits(limits);
+            return limits;
+        } catch {
+            return null;
+        }
+    }, []);
+
+    // The robot's motion limits drive the playback estimate. Fetch them when
+    // the dashboard link comes up and whenever the OpMode state changes (the
+    // path server only answers while an OpMode is INIT/RUNNING), keep the last
+    // good values while connected, and drop them when the link goes away.
+    useEffect(() => {
+        if (!isConnected) {
+            setRobotLimits(null);
+            return;
+        }
+        fetchRobotLimits();
+    }, [isConnected, robotState, fetchRobotLimits]);
 
     useEffect(() => {
         let cancelled = false;
@@ -444,9 +514,83 @@ export default function App() {
     const totalLength = useMemo(() => polylineLength(waypoints), [waypoints]);
     const endHeadingValue = useMemo(() => normDeg(num(endHeading)), [endHeading]);
 
+    const previewLimits = useMemo(() => {
+        const fallbackSpeed = Math.max(PREVIEW_MIN_SPEED_IN_S, Number(previewMaxSpeed) || DEFAULT_PLAYBACK_SPEED_IN_PER_S);
+        const fallbackAccel = Math.max(EPS, Number(previewMaxAccel) || DEFAULT_MAX_ACCEL_IN_PER_S2);
+        if (robotLimits?.maxSpeedInS > 0) {
+            const accel = robotLimits.maxAccelInS2 > 0 ? robotLimits.maxAccelInS2 : fallbackAccel;
+            return {
+                source: "robot",
+                maxSpeed: robotLimits.maxSpeedInS,
+                maxStrafe: robotLimits.maxStrafeSpeedInS > 0 ? robotLimits.maxStrafeSpeedInS : robotLimits.maxSpeedInS,
+                accel,
+                accelFromRobot: robotLimits.maxAccelInS2 > 0,
+                decel: robotLimits.maxDecelInS2 > 0 ? robotLimits.maxDecelInS2 : accel,
+            };
+        }
+        return {
+            source: "fallback",
+            maxSpeed: fallbackSpeed,
+            maxStrafe: fallbackSpeed,
+            accel: fallbackAccel,
+            accelFromRobot: false,
+            decel: fallbackAccel,
+        };
+    }, [robotLimits, previewMaxSpeed, previewMaxAccel]);
+
+    // Percent of max speed in effect for each segment. Velocity tags fire when
+    // the robot reaches the end of their segment, so a tag on segment i takes
+    // effect from segment i+1; a start-pose tag (segment -1) applies from
+    // segment 0. When two tags share a segment the later one in the list wins.
+    const segmentSpeedPercents = useMemo(() => {
+        const changes = new Map();
+        tags.forEach((tag) => {
+            if (String(tag.name || "").trim() !== "velocity") return;
+            const from = tagSegmentIndex(tag.index, segments.length) + 1;
+            changes.set(from, velocityTagPercent(resolveTagValueWith(tag, globalVars)));
+        });
+        let current = 100;
+        return segments.map((_, index) => {
+            if (changes.has(index)) current = changes.get(index);
+            return current;
+        });
+    }, [tags, segments, globalVars]);
+
+    // Cruise cap for every waypoint edge (waypoints[j] -> waypoints[j+1], which
+    // ends at pathPoints[j]): the robot's max speed, pulled toward the strafe
+    // limit as the travel direction turns away from the heading (an ellipse
+    // between the two limits), then scaled by the segment's percent.
+    const edgeCruiseSpeeds = useMemo(() => {
+        const headings = [num(startPose.h), ...pathPoints.map((p) => num(p.h ?? 0))];
+        const {maxSpeed, maxStrafe} = previewLimits;
+        let segmentIndex = 0;
+        return pathPoints.map((point, j) => {
+            while (segmentIndex < segmentEndIndices.length - 1 && segmentEndIndices[segmentIndex] < j) segmentIndex += 1;
+            const pct = segmentSpeedPercents[segmentIndex] ?? 100;
+            const prev = waypoints[j];
+            const dx = point.x - prev.x;
+            const dy = point.y - prev.y;
+            let cap = maxSpeed;
+            if (maxStrafe !== maxSpeed && Math.hypot(dx, dy) > 1e-6) {
+                const travelDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
+                const headingDeg = normDeg(headings[j] + shortestDeltaDeg(headings[j], headings[j + 1]) / 2);
+                const theta = (normDeg(travelDeg - headingDeg) * Math.PI) / 180;
+                const along = Math.cos(theta) / maxSpeed;
+                const across = Math.sin(theta) / maxStrafe;
+                cap = 1 / Math.sqrt(along * along + across * across);
+            }
+            return cap * (pct / 100);
+        });
+    }, [pathPoints, waypoints, startPose.h, segmentEndIndices, segmentSpeedPercents, previewLimits]);
+
     const previewProfile = useMemo(
-        () => buildSpeedProfile(waypoints, previewSpeed, maxAccel),
-        [waypoints, previewSpeed, maxAccel]
+        () => buildSpeedProfile(waypoints, {
+            edgeCruise: edgeCruiseSpeeds,
+            fallbackCruise: previewLimits.maxSpeed,
+            accel: previewLimits.accel,
+            decel: previewLimits.decel,
+        }),
+        [waypoints, edgeCruiseSpeeds, previewLimits]
     );
 
     const {
@@ -494,17 +638,14 @@ export default function App() {
         if (!restoredRef.current) return;
         const timer = setTimeout(() => {
             try {
-                localStorage.setItem(
-                    AUTOSAVE_KEY,
-                    JSON.stringify({...buildSerializable(), previewSpeed: Number(previewSpeed) || 0})
-                );
+                localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(buildSerializable()));
             } catch {
                 // storage unavailable or full; nothing to do
             }
         }, 400);
         return () => clearTimeout(timer);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [segments, tags, startPose, alliance, globalVars, previewSpeed, maxAccel, endHeading, headingMode, snapInches]);
+    }, [segments, tags, startPose, alliance, globalVars, endHeading, headingMode, snapInches]);
 
     useEffect(() => {
         if (!livePose) return;
@@ -767,23 +908,10 @@ export default function App() {
         });
     };
 
-    const resolveTagValue = (tag) => {
-        if (tag?.globalName) {
-            const match = globalVars.find((entry) => entry.name === tag.globalName);
-            const resolved = Number(match?.value);
-            if (Number.isFinite(resolved)) return resolved;
-        }
-        return Number(tag?.value) || 0;
-    };
+    const resolveTagValue = (tag) => resolveTagValueWith(tag, globalVars);
 
-    // Tags are stored with a 1-based display-point index (0 = start pose).
-    // The upload/export "segment" field is the 0-based index of the segment
-    // whose end point the tag sits at; a start-pose tag reports -1.
-    const resolveTagSegmentIndex = (tagIndex) => {
-        const parsed = Number(tagIndex);
-        if (!Number.isFinite(parsed) || parsed <= 0 || segments.length === 0) return -1;
-        return Math.min(segments.length, Math.trunc(parsed)) - 1;
-    };
+    // Upload/export "segment" field for a tag (see tagSegmentIndex).
+    const resolveTagSegmentIndex = (tagIndex) => tagSegmentIndex(tagIndex, segments.length);
 
     const serializeTags = () => tags.map((tag) => ({
         index: resolveSegmentEndIndex(tag.index),
@@ -1266,6 +1394,10 @@ export default function App() {
                     httpErr.status = response.status;
                     throw httpErr;
                 }
+                const responseBody = await response.json().catch(() => null);
+                const limitsFromUpload = parseRobotLimits(responseBody);
+                if (limitsFromUpload) setRobotLimits(limitsFromUpload);
+                fetchRobotLimits();
                 setUploadStatus("ok");
                 uploadTimerRef.current = setTimeout(() => setUploadStatus("idle"), UPLOAD_RESET_OK_MS);
                 setLastUpload({
@@ -1394,11 +1526,8 @@ public static class Tag {
 }
 public static Tag[] tags = new Tag[] {
 ${tagsBlock}
-};
-
-// ---- CONFIG ----
-public static double MAX_ACCEL_IN_S2 = ${toFixed(Number(maxAccel) || 0, 2)};`;
-    }, [pathPoints, startPose, tags, maxAccel, globalVars]);
+};`;
+    }, [pathPoints, startPose, tags, globalVars]);
 
     const buildSerializable = () => ({
         version: PATH_FILE_VERSION,
@@ -1409,7 +1538,6 @@ public static double MAX_ACCEL_IN_S2 = ${toFixed(Number(maxAccel) || 0, 2)};`;
         segments: serializeSegments(),
         headingMode,
         endHeading: endHeadingValue,
-        maxAccel: Number(maxAccel) || 0,
         snapInches: Number(snapInches) || 0,
         robot: {...robotDimensions},
         tags: serializeTags(),
@@ -1511,11 +1639,8 @@ public static double MAX_ACCEL_IN_S2 = ${toFixed(Number(maxAccel) || 0, 2)};`;
             }
             if (typeof data.headingMode === "string") setHeadingMode(normalizeHeadingMode(data.headingMode));
             if (Number.isFinite(Number(data.endHeading))) setEndHeading(String(Number(data.endHeading)));
-            // previewSpeed only lives in the autosave; exported files never carry it.
-            if (Number.isFinite(Number(data.previewSpeed)) && Number(data.previewSpeed) > 0) {
-                setPreviewSpeed(String(Number(data.previewSpeed)));
-            }
-            if (Number.isFinite(Number(data.maxAccel))) setMaxAccel(String(Number(data.maxAccel)));
+            // Older files carried velocity/maxAccel/tolerance; the playback
+            // estimate now comes from the robot (or Setup), so they are ignored.
             if (Number.isFinite(Number(data.snapInches))) setSnapInches(String(Number(data.snapInches)));
             if (data.robot && typeof data.robot === "object") setRobotDimensions({...robotDimensions, ...data.robot});
             if (Array.isArray(data.globals)) {
@@ -1611,6 +1736,8 @@ public static double MAX_ACCEL_IN_S2 = ${toFixed(Number(maxAccel) || 0, 2)};`;
     const setupInitialSettings = useMemo(() => ({
         fieldSize,
         fieldImage,
+        previewMaxSpeed,
+        previewMaxAccel,
         showGrid,
         gridStep,
         gridStepEntry,
@@ -1622,7 +1749,7 @@ public static double MAX_ACCEL_IN_S2 = ${toFixed(Number(maxAccel) || 0, 2)};`;
         panelOpacity,
         cardOpacity,
         uiScale,
-    }), [fieldSize, fieldImage, showGrid, gridStep, gridStepEntry, robotDimensions, palette, themeName, uiStyle, blurStrength, panelOpacity, cardOpacity, uiScale]);
+    }), [fieldSize, fieldImage, previewMaxSpeed, previewMaxAccel, showGrid, gridStep, gridStepEntry, robotDimensions, palette, themeName, uiStyle, blurStrength, panelOpacity, cardOpacity, uiScale]);
 
     const exportDefaultName = `${alliance}_path_${new Date().toISOString().slice(0, 10)}`;
 
@@ -1666,10 +1793,6 @@ public static double MAX_ACCEL_IN_S2 = ${toFixed(Number(maxAccel) || 0, 2)};`;
                 setHeadingMode={setHeadingMode}
                 endHeading={endHeading}
                 setEndHeading={setEndHeading}
-                previewSpeed={previewSpeed}
-                setPreviewSpeed={setPreviewSpeed}
-                maxAccel={maxAccel}
-                setMaxAccel={setMaxAccel}
                 snapInches={snapInches}
                 setSnapInches={setSnapInches}
                 startPose={startPose}
@@ -1792,6 +1915,7 @@ public static double MAX_ACCEL_IN_S2 = ${toFixed(Number(maxAccel) || 0, 2)};`;
                 onStop={handleStop}
                 pointsCount={displayPoints.length}
                 totalLength={totalLength}
+                previewLimits={previewLimits}
                 playDist={playDist}
                 code={code}
                 onUndo={undoLast}

@@ -28,6 +28,11 @@ Optional: Edit `config.js` (next to `index.html`) to customize defaults and tag 
 - Requires code from https://github.com/OverlakeRobotics/OverlakeRoboticsLibrary to be on the robot for direct upload and pose updating
 - Uploads send the path as segments (line / bezier / arc with an explicit heading mode) for the Pedro Pathing follower, plus the sampled points for live drawing. There is no global velocity or tolerance any more: speed is set with `velocity` tags and the follower owns its own tolerances.
 
+### Playback preview
+- The ghost robot and estimated time use the robot's real limits (max speed, strafe speed, accel/decel) fetched from the path server whenever the robot is connected or after an upload; the Playback card says which limits are in use.
+- `velocity` tags are honored per segment: a tag on a point changes the speed from the next segment on (a start-point tag applies from the first segment).
+- Without a robot, Setup > General > Playback Preview provides fallback max speed and accel values. These are never uploaded or exported.
+
 ### Edit mode
 - Select and drag points directly on the field
 - Expand any point in the right panel to edit X, Y, and heading

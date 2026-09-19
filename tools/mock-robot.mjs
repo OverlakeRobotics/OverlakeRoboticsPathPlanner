@@ -39,8 +39,17 @@ const TICK_MS = 20;
 const HEADING_RATE_DEG_S = 270;
 const DONE_POS_TOL_IN = 0.5;
 const DONE_HEADING_TOL_DEG = 1.0;
+// Motion limits the robot reports in GET /config (and echoes on POST /points)
+// so the webapp's playback estimate uses real numbers. maxAccelInS2 is null
+// when the robot does not measure it; the webapp then falls back to Setup.
+const ROBOT_LIMITS = {
+  maxSpeedInS: 40,
+  maxStrafeSpeedInS: 34,
+  maxDecelInS2: 30,
+  maxAccelInS2: null,
+};
 // Simulated drivetrain: "velocity" tags scale this max speed (percent).
-const SIM_MAX_SPEED_IN_S = 40;
+const SIM_MAX_SPEED_IN_S = ROBOT_LIMITS.maxSpeedInS;
 const ADVANCE_TOL_IN = 1.0;
 const SEGMENT_TYPES = new Set(["line", "bezier", "arc", "free"]);
 const HEADING_MODES = new Set(["straight", "tangent"]);
@@ -326,6 +335,7 @@ const httpServer = createServer((req, res) => {
           points: robot.points.length + 1,
           segments: robot.segments.length,
           tags: robot.tags.length,
+          robot: ROBOT_LIMITS,
         });
       } catch (err) {
         log("HTTP", `POST /points -> 500 (${err.message})`);
@@ -359,7 +369,7 @@ const httpServer = createServer((req, res) => {
       points: robot.points.length + 1,
       segments: robot.segments.length,
       tags: robot.tags.length,
-      maxSpeedInS: SIM_MAX_SPEED_IN_S,
+      robot: ROBOT_LIMITS,
     });
     return;
   }

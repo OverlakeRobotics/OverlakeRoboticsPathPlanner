@@ -18,10 +18,6 @@ export default function BuildPanel({
                                        setHeadingMode,
                                        endHeading,
                                        setEndHeading,
-                                       previewSpeed,
-                                       setPreviewSpeed,
-                                       maxAccel,
-                                       setMaxAccel,
                                        snapInches,
                                        setSnapInches,
                                        startPose,
@@ -306,19 +302,13 @@ export default function BuildPanel({
                 onKeyDown={(event) => handleToggleKey(event, "motion")}
             >
                 <div>
-                    <h3>Preview & Placement</h3>
-                    <p>Playback estimate and snapping preferences. Speed on the robot is set with velocity tags.</p>
+                    <h3>Placement</h3>
+                    <p>Snap new points to a grid. Robot speed is set with velocity tags; the playback estimate uses the robot's limits.</p>
                 </div>
                 <span className="collapse-caret">{openSections.motion ? "\u25BE" : "\u25B8"}</span>
             </div>
             {openSections.motion && (
                 <div className="field-grid" id="motion-card">
-                    <Field label="Preview speed (in/s)">
-                        <input type="number" min={1} max={200} step={1} value={previewSpeed} onChange={(event) => setPreviewSpeed(event.target.value)} />
-                    </Field>
-                    <Field label="Max accel (in/s^2)">
-                        <input type="number" min={1} max={400} step={1} value={maxAccel} onChange={(event) => setMaxAccel(event.target.value)} />
-                    </Field>
                     <Field label="Snap (in)">
                         <input type="number" min={0} step={0.1} value={snapInches} onChange={(event) => setSnapInches(event.target.value)} />
                     </Field>

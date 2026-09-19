@@ -37,6 +37,7 @@ export default function RunPanel({
                                      onStop,
                                      pointsCount,
                                      totalLength,
+                                     previewLimits,
                                      playDist,
                                      code,
                                      onUndo,
@@ -586,6 +587,16 @@ export default function RunPanel({
                         <Stat label="Length (in)" value={lengthDisplay} />
                         <Stat label="Est. time (s)" value={timeDisplay} />
                     </div>
+                    {previewLimits && (
+                        <p
+                            className="helper-text playback-note"
+                            title={`accel ${toFixed(previewLimits.accel, 1)} in/s^2${previewLimits.source === "robot" && !previewLimits.accelFromRobot ? " (Setup fallback)" : ""}, decel ${toFixed(previewLimits.decel, 1)} in/s^2, strafe ${toFixed(previewLimits.maxStrafe, 1)} in/s`}
+                        >
+                            {previewLimits.source === "robot"
+                                ? `Using robot limits: ${toFixed(previewLimits.maxSpeed, 1)} in/s`
+                                : `Using preview fallback: ${toFixed(previewLimits.maxSpeed, 1)} in/s (connect to the robot for its real limits)`}
+                        </p>
+                    )}
                     <div className="progress-line">
                         <span className="small">Progress</span>
                         <span className="small">

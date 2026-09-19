@@ -25,8 +25,12 @@ real Control Hub:
   see the live pose move in the webapp), and fires tags at the point each one is
   attached to: `velocity` sets the speed as a **percent of a fixed 40 in/s max**
   (values in 0-1 are treated as a fraction, anything above 1 as a percent),
-  `pause` holds position, anything else is logged. `GET /config` reports the
-  stored alliance, point/segment/tag counts and the simulated max speed.
+  `pause` holds position, anything else is logged. `GET /config` (and every
+  `POST /points` response) reports the stored alliance, point/segment/tag
+  counts and the robot's motion limits as
+  `robot: {maxSpeedInS: 40, maxStrafeSpeedInS: 34, maxDecelInS2: 30, maxAccelInS2: null}`,
+  which the webapp uses for its playback time estimate (a null accel makes it
+  fall back to the Setup value).
 
 ### Usage
 

@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import {
     FIELD_SIZE_IN,
     DEFAULT_FIELD_IMAGE,
+    DEFAULT_PLAYBACK_SPEED_IN_PER_S,
+    DEFAULT_MAX_ACCEL_IN_PER_S2,
     GRID_DEFAULT_STEP,
     DEFAULT_ROBOT_DIMENSIONS,
     PATH_COLOR,
@@ -30,6 +32,8 @@ export default function SetupModal({ isOpen, onClose, onSave, initialSettings })
     // General Settings
     const [fieldSize, setFieldSize] = useState(FIELD_SIZE_IN);
     const [fieldImage, setFieldImage] = useState(resolveFieldImageKey(DEFAULT_FIELD_IMAGE));
+    const [previewMaxSpeed, setPreviewMaxSpeed] = useState(String(DEFAULT_PLAYBACK_SPEED_IN_PER_S));
+    const [previewMaxAccel, setPreviewMaxAccel] = useState(String(DEFAULT_MAX_ACCEL_IN_PER_S2));
     const [showGrid, setShowGrid] = useState(true);
     const [gridStepEntry, setGridStepEntry] = useState(String(GRID_DEFAULT_STEP));
     const [robotDimensions, setRobotDimensions] = useState({...DEFAULT_ROBOT_DIMENSIONS});
@@ -62,6 +66,8 @@ export default function SetupModal({ isOpen, onClose, onSave, initialSettings })
         if (!settings) return;
         setFieldSize(settings.fieldSize || FIELD_SIZE_IN);
         setFieldImage(resolveFieldImageKey(settings.fieldImage, DEFAULT_FIELD_IMAGE));
+        setPreviewMaxSpeed(String(Number(settings.previewMaxSpeed) > 0 ? Number(settings.previewMaxSpeed) : DEFAULT_PLAYBACK_SPEED_IN_PER_S));
+        setPreviewMaxAccel(String(Number(settings.previewMaxAccel) > 0 ? Number(settings.previewMaxAccel) : DEFAULT_MAX_ACCEL_IN_PER_S2));
         setShowGrid(Boolean(settings.showGrid));
         const step = Number(settings.gridStep);
         const nextStep = Number.isFinite(step) && step > 0 ? step : GRID_DEFAULT_STEP;
@@ -101,6 +107,12 @@ export default function SetupModal({ isOpen, onClose, onSave, initialSettings })
         return Math.min(36, Math.max(1, parsed));
     };
 
+    const clampPositive = (value, fallback, max) => {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+        return Math.min(max, parsed);
+    };
+
     const handleSave = () => {
         const parsed = parseFloat(gridStepEntry);
         const resolvedStep = (!gridStepEntry || !Number.isFinite(parsed) || parsed <= 0)
@@ -113,6 +125,8 @@ export default function SetupModal({ isOpen, onClose, onSave, initialSettings })
         onSave({
             fieldSize: resolvedField,
             fieldImage: resolveFieldImageKey(fieldImage, DEFAULT_FIELD_IMAGE),
+            previewMaxSpeed: clampPositive(previewMaxSpeed, DEFAULT_PLAYBACK_SPEED_IN_PER_S, 200),
+            previewMaxAccel: clampPositive(previewMaxAccel, DEFAULT_MAX_ACCEL_IN_PER_S2, 400),
             showGrid,
             gridStep: resolvedStep,
             gridStepEntry: String(resolvedStep),
@@ -134,6 +148,8 @@ export default function SetupModal({ isOpen, onClose, onSave, initialSettings })
     const handleReset = () => {
         setFieldSize(FIELD_SIZE_IN);
         setFieldImage(resolveFieldImageKey(DEFAULT_FIELD_IMAGE));
+        setPreviewMaxSpeed(String(DEFAULT_PLAYBACK_SPEED_IN_PER_S));
+        setPreviewMaxAccel(String(DEFAULT_MAX_ACCEL_IN_PER_S2));
         setShowGrid(true);
         setGridStepEntry(String(GRID_DEFAULT_STEP));
         setRobotDimensions({...DEFAULT_ROBOT_DIMENSIONS});
@@ -282,6 +298,38 @@ export default function SetupModal({ isOpen, onClose, onSave, initialSettings })
                                     </div>
                                 </div>
                                 <p className="helper-text">Length aligns with +X, width with +Y.</p>
+                            </div>
+
+                            <div className="modal-section">
+                                <h3>Playback Preview</h3>
+                                <div className="field-grid">
+                                    <div className="field">
+                                        <label>Preview max speed (in/s)</label>
+                                        <input
+                                            type="number"
+                                            min={1}
+                                            max={200}
+                                            step={1}
+                                            value={previewMaxSpeed}
+                                            onChange={(event) => setPreviewMaxSpeed(event.target.value)}
+                                        />
+                                    </div>
+                                    <div className="field">
+                                        <label>Preview max accel (in/s^2)</label>
+                                        <input
+                                            type="number"
+                                            min={1}
+                                            max={400}
+                                            step={1}
+                                            value={previewMaxAccel}
+                                            onChange={(event) => setPreviewMaxAccel(event.target.value)}
+                                        />
+                                    </div>
+                                </div>
+                                <p className="helper-text">
+                                    Fallback for the playback ghost and time estimate. When the robot is connected its own limits from
+                                    the path server are used instead (accel too, unless the robot leaves it unset).
+                                </p>
                             </div>
                         </>
                     )}
