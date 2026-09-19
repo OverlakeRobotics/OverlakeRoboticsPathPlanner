@@ -9,17 +9,24 @@ real Control Hub:
   status, `INIT_OP_MODE` / `START_OP_MODE` / `STOP_OP_MODE`
 - **PathServer HTTP** on `http://localhost:8099` — `POST /points`,
   `GET /pose`, `GET /start`, `GET /config`, with the same CORS headers and the
-  same partial-update semantics as `PathServer.java` (absent `velocity` /
-  `tolerance` / `alliance` keep previous values; an absent `tags` key resets
-  tags — matching the real code)
+  same partial-update semantics as the robot (absent `start` / `points` /
+  `segments` / `alliance` keep previous values; an absent `tags` key resets
+  tags). It accepts the **version 2** payload: `start`, `points`, `alliance`,
+  `segments` (`type`, `headingMode`, `end`, `control`/`mid`, optional
+  `samples`) and `tags` with `{index, segment, name, value}`. Each segment is
+  validated the way the Pedro Pathing side would (known `type`, explicit
+  `headingMode` of `straight`/`tangent`, required `control`/`mid`), so a bad
+  payload fails with a 500 and a reason. A leftover global `velocity` /
+  `tolerance` is ignored with a warning.
 - **OpMode lifecycle gating** — like the real PathServer, the HTTP side is only
   reachable while an OpMode is INIT or RUNNING. Pass `--always-on` to disable.
-- **A simulated robot** that drives uploaded paths with the same point-advance
-  logic as `OdometryHolonomicDrivetrain`, feeds `GET /pose` (so you see the
-  live pose move in the webapp), and fires tags like `PathPlanExample`:
-  `velocity` changes speed, `pause` holds position, anything else is logged.
-  It also logs warnings where the *real* robot code would crash (starting with
-  no uploaded path, `pause` tag on the start point).
+- **A simulated robot** that drives the uploaded sampled `points` with a simple
+  point-advance loop (it does not run Pedro Pathing), feeds `GET /pose` (so you
+  see the live pose move in the webapp), and fires tags at the point each one is
+  attached to: `velocity` sets the speed as a **percent of a fixed 40 in/s max**
+  (values in 0-1 are treated as a fraction, anything above 1 as a percent),
+  `pause` holds position, anything else is logged. `GET /config` reports the
+  stored alliance, point/segment/tag counts and the simulated max speed.
 
 ### Usage
 

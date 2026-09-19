@@ -8,9 +8,12 @@
 //     Only reachable while an OpMode is INIT or RUNNING, matching PathServer's
 //     real lifecycle (started in OpMode init(), stopped in stop()).
 //
-// A simulated robot drives uploaded paths with the same point-advance logic as
-// OdometryHolonomicDrivetrain and fires tags like PathPlanExample (velocity,
-// pause; anything else is logged).
+// Accepts the version-2 upload payload (start, points, alliance, segments,
+// tags with {index, segment, name, value}). The Pedro Pathing follower on the
+// real robot builds its path from "segments"; this mock only validates them
+// and drives the sampled "points" with a simple point-advance loop. Tags fire
+// like the real OpMode: "velocity" is a percent of the simulated max speed,
+// "pause" holds position, anything else is logged.
 //
 // Usage:
 //   node tools/mock-robot.mjs [--always-on]
@@ -36,6 +39,11 @@ const TICK_MS = 20;
 const HEADING_RATE_DEG_S = 270;
 const DONE_POS_TOL_IN = 0.5;
 const DONE_HEADING_TOL_DEG = 1.0;
+// Simulated drivetrain: "velocity" tags scale this max speed (percent).
+const SIM_MAX_SPEED_IN_S = 40;
+const ADVANCE_TOL_IN = 1.0;
+const SEGMENT_TYPES = new Set(["line", "bezier", "arc", "free"]);
+const HEADING_MODES = new Set(["straight", "tangent"]);
 
 const now = () => Date.now();
 const ts = () => new Date().toISOString().slice(11, 23);
@@ -57,16 +65,16 @@ const robot = {
   pose: { x: 0, y: 0, h: 0 },
   poseT: now(),
   // PathServer storage
+  version: 0,
   start: [0, 0, 0],
   points: [], // [[x, y, h], ...] dense samples, start excluded
-  velocity: 0,
-  tolerance: 0,
+  segments: [], // [{type, headingMode, end, control?, mid?, samples?}]
   alliance: "unknown",
-  tags: [], // [{index, name, value}] sorted by index
+  tags: [], // [{index, segment, name, value}] sorted by index
   // follower
   driving: false,
   currentPoint: 0,
-  driveVelocity: 0,
+  speedPct: 100,
   tagPtr: 0,
   pauseUntil: 0,
   driveStartedAt: 0,
@@ -88,19 +96,26 @@ function startFollowing() {
   }
   robot.pose = { x: robot.start[0], y: robot.start[1], h: robot.start[2] };
   robot.currentPoint = 0;
-  robot.driveVelocity = robot.velocity;
+  robot.speedPct = 100;
   robot.tagPtr = 0;
   robot.pauseUntil = 0;
   robot.driving = true;
   robot.driveStartedAt = now();
-  if (robot.driveVelocity <= 0) {
-    log("SIM", "warning: uploaded velocity is 0 — robot will not move (same as real robot)");
-  }
   log(
     "SIM",
-    `following path: ${robot.points.length} points, v=${robot.velocity} in/s, tol=${robot.tolerance} in, ${robot.tags.length} tags`
+    `following path: ${robot.segments.length} segments / ${robot.points.length} points at ${SIM_MAX_SPEED_IN_S} in/s max, ${robot.tags.length} tags`
   );
 }
+
+const driveVelocity = () => (SIM_MAX_SPEED_IN_S * robot.speedPct) / 100;
+
+// "velocity" tag values are percent of max speed. Legacy files may still hold
+// a 0-1 fraction; anything above 1 is taken as a percent (same as the robot).
+const velocityTagToPercent = (value) => {
+  const n = Number(value) || 0;
+  const pct = n > 1 ? n : n * 100;
+  return Math.max(0, Math.min(100, pct));
+};
 
 function fireTags() {
   while (
@@ -108,22 +123,21 @@ function fireTags() {
     robot.tags[robot.tagPtr].index <= robot.currentPoint
   ) {
     const tag = robot.tags[robot.tagPtr++];
+    const where = `point ${robot.currentPoint} (segment ${tag.segment})`;
     if (tag.name === "velocity") {
-      robot.driveVelocity = tag.value;
-      log("SIM", `tag velocity=${tag.value} fired at point ${robot.currentPoint} — speed changed`);
-    } else if (tag.name === "pause") {
-      if (tag.index === 0) {
-        log(
-          "SIM",
-          "WARNING: pause tag on the start point — the real PathPlanExample would CRASH (positions[-1]). Pausing anyway."
-        );
+      robot.speedPct = velocityTagToPercent(tag.value);
+      if (robot.speedPct <= 0) {
+        log("SIM", `tag velocity=${tag.value} fired at ${where} — 0% of max speed, robot will not move`);
+      } else {
+        log("SIM", `tag velocity=${tag.value} fired at ${where} — now ${robot.speedPct}% of max (${round2(driveVelocity())} in/s)`);
       }
+    } else if (tag.name === "pause") {
       robot.pauseUntil = now() + tag.value * 1000;
-      log("SIM", `tag pause=${tag.value}s fired at point ${robot.currentPoint}`);
+      log("SIM", `tag pause=${tag.value}s fired at ${where}`);
     } else {
       log(
         "SIM",
-        `tag "${tag.name}"=${tag.value} fired at point ${robot.currentPoint} (custom tag — your OpMode defines what this does)`
+        `tag "${tag.name}"=${tag.value} fired at ${where} (custom tag — your OpMode defines what this does)`
       );
     }
   }
@@ -137,7 +151,7 @@ function tick() {
   if (now() < robot.pauseUntil) return;
 
   const dt = TICK_MS / 1000;
-  const tolEff = Math.max(robot.tolerance, DONE_POS_TOL_IN);
+  const tolEff = ADVANCE_TOL_IN;
   let target = robot.points[robot.currentPoint];
   let dist = Math.hypot(target[0] - robot.pose.x, target[1] - robot.pose.y);
 
@@ -149,8 +163,8 @@ function tick() {
     fireTags();
   }
 
-  // translate toward target at driveVelocity
-  const step = Math.max(robot.driveVelocity, 0) * dt;
+  // translate toward target at the current percent of max speed
+  const step = Math.max(driveVelocity(), 0) * dt;
   if (dist > 1e-9) {
     const f = Math.min(step / dist, 1);
     robot.pose.x += (target[0] - robot.pose.x) * f;
@@ -195,10 +209,44 @@ function json(res, code, body) {
   res.end(JSON.stringify(body));
 }
 
-// Mirrors PathServer.applyPayload: all fields optional; velocity/tolerance/
-// alliance keep previous values when absent, but an absent "tags" key RESETS
-// tags to empty (same asymmetry as the real code).
+const num3 = (p) => ({ x: Number(p?.x) || 0, y: Number(p?.y) || 0, h: Number(p?.h) || 0 });
+const num2 = (p) => ({ x: Number(p?.x) || 0, y: Number(p?.y) || 0 });
+
+// Validates one entry of "segments" the way the robot-side parser would.
+// Throws on anything the Pedro follower could not build a path from.
+function parseSegment(raw, i) {
+  if (typeof raw !== "object" || raw === null) throw new Error(`segments[${i}] is not an object`);
+  const type = String(raw.type ?? "");
+  if (!SEGMENT_TYPES.has(type)) throw new Error(`segments[${i}] has unknown type "${type}"`);
+  const headingMode = String(raw.headingMode ?? "");
+  if (!HEADING_MODES.has(headingMode)) {
+    throw new Error(`segments[${i}] headingMode must be "straight" or "tangent" (got "${raw.headingMode}")`);
+  }
+  if (typeof raw.end !== "object" || raw.end === null) throw new Error(`segments[${i}] is missing "end"`);
+  if (type === "bezier" && (typeof raw.control !== "object" || raw.control === null)) {
+    throw new Error(`segments[${i}] (bezier) is missing "control"`);
+  }
+  if (type === "arc" && (typeof raw.mid !== "object" || raw.mid === null)) {
+    throw new Error(`segments[${i}] (arc) is missing "mid"`);
+  }
+  const samples = Array.isArray(raw.samples) ? raw.samples.map(num3) : [];
+  if (type === "free" && samples.length === 0) {
+    throw new Error(`segments[${i}] (free) needs "samples"`);
+  }
+  return {
+    type,
+    headingMode,
+    end: num3(raw.end),
+    control: type === "bezier" ? num2(raw.control) : undefined,
+    mid: type === "arc" ? num2(raw.mid) : undefined,
+    samples,
+  };
+}
+
+// Mirrors the robot-side applyPayload: start/points/segments/alliance keep
+// previous values when absent, but an absent "tags" key RESETS tags to empty.
 function applyPayload(body) {
+  robot.version = Number(body.version) || 1;
   if (Array.isArray(body.start)) {
     robot.start = [0, 1, 2].map((i) => Number(body.start[i]) || 0);
   }
@@ -209,17 +257,31 @@ function applyPayload(body) {
       Number(p?.[2]) || 0,
     ]);
   }
-  if ("velocity" in body) robot.velocity = Number(body.velocity) || 0;
-  if ("tolerance" in body) robot.tolerance = Number(body.tolerance) || 0;
+  if (Array.isArray(body.segments)) {
+    robot.segments = body.segments.map(parseSegment);
+  } else if (Array.isArray(body.points)) {
+    // New points without segments: drop the stale segments rather than pair
+    // them with a path they no longer describe.
+    robot.segments = [];
+    if (robot.version >= 2) {
+      log("HTTP", 'warning: version 2 payload without "segments" — Pedro follower would have no path to build');
+    }
+  }
+  if ("velocity" in body || "tolerance" in body) {
+    log("HTTP", 'warning: payload still has global "velocity"/"tolerance" — ignored (removed in version 2)');
+  }
   if ("alliance" in body) {
     robot.alliance = String(body.alliance ?? "unknown").trim().toLowerCase();
   }
   robot.tags = (Array.isArray(body.tags) ? body.tags : [])
-    .map((t) => ({
-      index: Math.trunc(Number(t?.index) || 0),
-      name: String(t?.name ?? ""),
-      value: Number(t?.value) || 0,
-    }))
+    .map((t, i) => {
+      const index = Math.trunc(Number(t?.index) || 0);
+      const hasSegment = Number.isFinite(Number(t?.segment));
+      if (!hasSegment) log("HTTP", `warning: tags[${i}] "${t?.name}" has no "segment" field (legacy tag)`);
+      // start-pose tags carry segment -1; everything else names the segment it ends.
+      const segment = hasSegment ? Math.trunc(Number(t.segment)) : index === 0 ? -1 : index - 1;
+      return { index, segment, name: String(t?.name ?? ""), value: Number(t?.value) || 0 };
+    })
     .sort((a, b) => a.index - b.index);
 }
 
@@ -248,15 +310,21 @@ const httpServer = createServer((req, res) => {
           throw new Error("expected a JSON object");
         }
         applyPayload(body);
+        const segSummary = robot.segments
+          .map((s) => `${s.type}/${s.headingMode}`)
+          .join(", ");
         log(
           "HTTP",
-          `POST /points -> ok: ${robot.points.length} points, start=(${robot.start.map(round2).join(", ")}), v=${robot.velocity}, tol=${robot.tolerance}, alliance=${robot.alliance}, ${robot.tags.length} tags`
+          `POST /points -> ok: v${robot.version}, ${robot.segments.length} segments [${segSummary}], ${robot.points.length} points, start=(${robot.start.map(round2).join(", ")}), alliance=${robot.alliance}, ${robot.tags.length} tags`
         );
+        for (const t of robot.tags) {
+          log("HTTP", `   tag "${t.name}"=${t.value} @ point ${t.index}, segment ${t.segment}`);
+        }
         json(res, 200, {
           ok: true,
+          version: robot.version,
           points: robot.points.length + 1,
-          velocity: robot.velocity,
-          tolerance: robot.tolerance,
+          segments: robot.segments.length,
           tags: robot.tags.length,
         });
       } catch (err) {
@@ -286,11 +354,12 @@ const httpServer = createServer((req, res) => {
   if (req.method === "GET" && url.pathname === "/config") {
     json(res, 200, {
       ok: true,
-      velocity: robot.velocity,
-      tolerance: robot.tolerance,
+      version: robot.version,
       alliance: robot.alliance,
       points: robot.points.length + 1,
+      segments: robot.segments.length,
       tags: robot.tags.length,
+      maxSpeedInS: SIM_MAX_SPEED_IN_S,
     });
     return;
   }
