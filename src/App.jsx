@@ -1,5 +1,4 @@
 ﻿import {useCallback, useEffect, useMemo, useRef, useState} from "react";
-import decodeField from "./assets/decode_field.png";
 import "./App.css";
 
 import CanvasStage from "./components/CanvasStage";
@@ -12,8 +11,8 @@ import {
     DEFAULT_MAX_ACCEL_IN_PER_S2,
     DEFAULT_ROBOT_DIMENSIONS,
     DEFAULT_SNAP_IN,
-    DEFAULT_TOLERANCE_IN,
-    DEFAULT_VELOCITY_IN_PER_S,
+    DEFAULT_FIELD_IMAGE,
+    DEFAULT_PLAYBACK_SPEED_IN_PER_S,
     DEFAULT_LEFT_PANEL_WIDTH,
     DEFAULT_RIGHT_PANEL_WIDTH,
     MIN_LEFT_PANEL_WIDTH,
@@ -39,7 +38,8 @@ import {useTheme} from "./hooks/useTheme";
 import {useRobotConnection} from "./hooks/useRobotConnection";
 import {clamp, num, normDeg, toFixed} from "./utils/math";
 import {polylineLength} from "./utils/path";
-import {buildArcSegment, buildBezierSegment, buildLineSegment} from "./utils/segments";
+import {buildArcSegment, buildBezierSegment, buildLineSegment, normalizeHeadingMode} from "./utils/segments";
+import {getFieldImageSrc, resolveFieldImageKey} from "./constants/fieldImages";
 
 const sleep = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -198,6 +198,36 @@ const cloneSegments = (segments) =>
 const cloneTags = (tags) => tags.map((tag) => ({...tag}));
 
 const AUTOSAVE_KEY = "planner_path_v1";
+const PATH_FILE_VERSION = 2;
+const UPLOAD_PAYLOAD_VERSION = 2;
+
+// Bring a version-1 path file (or an older autosave) up to the version-2 shape:
+// the global velocity (in/s) and tolerance are gone, orth-left/orth-right
+// heading modes collapse to tangent, and every segment carries an explicit
+// headingMode. Tag "segment" indices are filled in later once the segments
+// are normalized (see applyImportedData).
+const migrateImportedData = (raw) => {
+    if (!raw || typeof raw !== "object") return raw;
+    const data = {...raw};
+    const version = Number(data.version) || 1;
+    const hasFileHeadingMode = typeof data.headingMode === "string";
+    const fileHeadingMode = hasFileHeadingMode ? normalizeHeadingMode(data.headingMode) : "straight";
+    if (hasFileHeadingMode) data.headingMode = fileHeadingMode;
+    delete data.velocity;
+    delete data.tolerance;
+    if (Array.isArray(data.segments)) {
+        data.segments = data.segments.map((segment) => {
+            if (!segment || typeof segment !== "object") return segment;
+            const explicit = typeof segment.headingMode === "string";
+            return {
+                ...segment,
+                headingMode: explicit ? normalizeHeadingMode(segment.headingMode) : fileHeadingMode,
+            };
+        });
+    }
+    data.version = Math.max(version, PATH_FILE_VERSION);
+    return data;
+};
 
 const isTypingTarget = (element) =>
     Boolean(element) && (
@@ -220,6 +250,7 @@ export default function App() {
     // Settings State
     const [showSetupModal, setShowSetupModal] = useState(false);
     const [fieldSize, setFieldSize] = useState(FIELD_SIZE_IN);
+    const [fieldImage, setFieldImage] = useState(resolveFieldImageKey(DEFAULT_FIELD_IMAGE));
     const [palette, setPalette] = useState({
         path: PATH_COLOR,
         start: START_COLOR,
@@ -248,6 +279,7 @@ export default function App() {
             try {
                 const parsed = JSON.parse(stored);
                 if (parsed.fieldSize) setFieldSize(parsed.fieldSize);
+                if (parsed.fieldImage) setFieldImage(resolveFieldImageKey(parsed.fieldImage, DEFAULT_FIELD_IMAGE));
                 if (parsed.showGrid !== undefined) setShowGrid(Boolean(parsed.showGrid));
                 if (Number.isFinite(Number(parsed.gridStep))) setGridStep(Number(parsed.gridStep));
                 if (parsed.gridStepEntry !== undefined) setGridStepEntry(String(parsed.gridStepEntry));
@@ -267,6 +299,7 @@ export default function App() {
 
     const handleSaveSettings = (settings) => {
         setFieldSize(settings.fieldSize);
+        setFieldImage(resolveFieldImageKey(settings.fieldImage, DEFAULT_FIELD_IMAGE));
         setShowGrid(Boolean(settings.showGrid));
         setGridStep(Number(settings.gridStep) || GRID_DEFAULT_STEP);
         setGridStepEntry(settings.gridStepEntry ?? String(settings.gridStep ?? GRID_DEFAULT_STEP));
@@ -316,9 +349,10 @@ export default function App() {
     const [headingMode, setHeadingMode] = useState("straight");
     const [endHeading, setEndHeading] = useState(String(0));
 
-    const [velocity, setVelocity] = useState(String(DEFAULT_VELOCITY_IN_PER_S));
+    // Preview-only motion model for the playback ghost and time estimate.
+    // Neither value is uploaded: the follower on the robot owns its speed.
+    const [previewSpeed, setPreviewSpeed] = useState(String(DEFAULT_PLAYBACK_SPEED_IN_PER_S));
     const [maxAccel, setMaxAccel] = useState(String(DEFAULT_MAX_ACCEL_IN_PER_S2));
-    const [tolerance, setTolerance] = useState(String(DEFAULT_TOLERANCE_IN));
     const [snapInches, setSnapInches] = useState(String(DEFAULT_SNAP_IN));
 
     const [robotDimensions, setRobotDimensions] = useState({...DEFAULT_ROBOT_DIMENSIONS});
@@ -360,10 +394,16 @@ export default function App() {
     const robotState = robotStatus?.activeOpModeStatus || null;
 
     useEffect(() => {
+        let cancelled = false;
         const img = new Image();
-        img.onload = () => setBackgroundImage(img);
-        img.src = decodeField;
-    }, []);
+        img.onload = () => {
+            if (!cancelled) setBackgroundImage(img);
+        };
+        img.src = getFieldImageSrc(fieldImage);
+        return () => {
+            cancelled = true;
+        };
+    }, [fieldImage]);
 
     useEffect(() => {
         leftWidthRef.current = leftWidth;
@@ -405,8 +445,8 @@ export default function App() {
     const endHeadingValue = useMemo(() => normDeg(num(endHeading)), [endHeading]);
 
     const previewProfile = useMemo(
-        () => buildSpeedProfile(waypoints, velocity, maxAccel),
-        [waypoints, velocity, maxAccel]
+        () => buildSpeedProfile(waypoints, previewSpeed, maxAccel),
+        [waypoints, previewSpeed, maxAccel]
     );
 
     const {
@@ -430,7 +470,7 @@ export default function App() {
             pathRevisionRef.current = next;
             return next;
         });
-    }, [segments, tags, startPose, alliance, velocity, tolerance]);
+    }, [segments, tags, startPose, alliance]);
 
     // Restore the working path after a refresh or crash.
     useEffect(() => {
@@ -454,14 +494,17 @@ export default function App() {
         if (!restoredRef.current) return;
         const timer = setTimeout(() => {
             try {
-                localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(buildSerializable()));
+                localStorage.setItem(
+                    AUTOSAVE_KEY,
+                    JSON.stringify({...buildSerializable(), previewSpeed: Number(previewSpeed) || 0})
+                );
             } catch {
                 // storage unavailable or full; nothing to do
             }
         }, 400);
         return () => clearTimeout(timer);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [segments, tags, startPose, alliance, globalVars, velocity, maxAccel, tolerance, endHeading, headingMode, snapInches]);
+    }, [segments, tags, startPose, alliance, globalVars, previewSpeed, maxAccel, endHeading, headingMode, snapInches]);
 
     useEffect(() => {
         if (!livePose) return;
@@ -733,6 +776,41 @@ export default function App() {
         return Number(tag?.value) || 0;
     };
 
+    // Tags are stored with a 1-based display-point index (0 = start pose).
+    // The upload/export "segment" field is the 0-based index of the segment
+    // whose end point the tag sits at; a start-pose tag reports -1.
+    const resolveTagSegmentIndex = (tagIndex) => {
+        const parsed = Number(tagIndex);
+        if (!Number.isFinite(parsed) || parsed <= 0 || segments.length === 0) return -1;
+        return Math.min(segments.length, Math.trunc(parsed)) - 1;
+    };
+
+    const serializeTags = () => tags.map((tag) => ({
+        index: resolveSegmentEndIndex(tag.index),
+        segment: resolveTagSegmentIndex(tag.index),
+        name: String(tag.name || ""),
+        value: resolveTagValue(tag),
+    }));
+
+    // Heading mode is resolved per segment; the global picker only seeds new
+    // segments, so this fallback is for segments built before it was stamped.
+    const resolveSegmentHeadingMode = (segment) => normalizeHeadingMode(segment?.headingMode, headingMode);
+
+    const serializeSegments = () => segments.map((segment) => ({
+        type: segment.type,
+        headingMode: resolveSegmentHeadingMode(segment),
+        end: segment.end ? {x: Number(segment.end.x), y: Number(segment.end.y), h: Number(segment.end.h ?? 0)} : undefined,
+        control: segment.control ? {x: Number(segment.control.x), y: Number(segment.control.y)} : undefined,
+        mid: segment.mid ? {x: Number(segment.mid.x), y: Number(segment.mid.y)} : undefined,
+        samples: Array.isArray(segment.samples)
+            ? segment.samples.map((sample) => ({
+                x: Number(sample.x),
+                y: Number(sample.y),
+                h: Number(sample.h ?? 0),
+            }))
+            : [],
+    }));
+
     const resolveSegmentEndIndex = (segmentIndex) => {
         const parsed = Number(segmentIndex);
         if (!Number.isFinite(parsed) || parsed <= 0) return 0;
@@ -779,7 +857,7 @@ export default function App() {
     const rebuildSegments = useCallback((segmentsList) => {
         let anchor = {x: num(startPose.x), y: num(startPose.y), h: num(startPose.h)};
         return segmentsList.map((segment) => {
-            const resolvedHeadingMode = segment.headingMode || headingMode;
+            const resolvedHeadingMode = normalizeHeadingMode(segment.headingMode, headingMode);
             const end = {
                 x: Number(segment.end?.x ?? anchor.x),
                 y: Number(segment.end?.y ?? anchor.y),
@@ -817,7 +895,7 @@ export default function App() {
                 });
             }
             anchor = rebuilt.end;
-            return {...rebuilt, headingMode: segment.headingMode};
+            return rebuilt;
         });
     }, [startPose, headingMode, endHeadingValue]);
 
@@ -851,7 +929,7 @@ export default function App() {
                 headingMode,
                 endHeading: endHeadingValue,
             });
-            return [...prev, {...seg, headingMode}];
+            return [...prev, seg];
         });
         setUndoStack((prev) => [...prev, {type: "bezier", count: 1}]);
         setRedoStack([]);
@@ -869,7 +947,7 @@ export default function App() {
                 headingMode,
                 endHeading: endHeadingValue,
             });
-            return [...prev, {...seg, headingMode}];
+            return [...prev, seg];
         });
         setUndoStack((prev) => [...prev, {type: "arc", count: 1}]);
         setRedoStack([]);
@@ -961,11 +1039,12 @@ export default function App() {
             const next = prev.map((segment) => ({...segment}));
             const target = next[index];
             if (!target || (target.type !== "bezier" && target.type !== "arc")) return prev;
+            const resolvedMode = normalizeHeadingMode(mode);
             const nextEnd = {...target.end};
-            if (mode === "straight") {
+            if (resolvedMode === "straight") {
                 nextEnd.h = Number.isFinite(Number(nextEnd?.h)) ? Number(nextEnd.h) : endHeadingValue;
             }
-            next[index] = {...target, headingMode: mode, end: nextEnd};
+            next[index] = {...target, headingMode: resolvedMode, end: nextEnd};
             return rebuildSegments(next);
         });
     };
@@ -1142,17 +1221,12 @@ export default function App() {
         if (uploadTimerRef.current) clearTimeout(uploadTimerRef.current);
         setUploadStatus("sending");
         const payload = {
-            version: 1,
+            version: UPLOAD_PAYLOAD_VERSION,
             start: [num(startPose.x), num(startPose.y), num(startPose.h)],
             points: pathPoints.map((p) => [Number(p.x), Number(p.y), Number(p.h ?? 0)]),
-            velocity: Number(velocity) || 0,
-            tolerance: Number(tolerance) || 0,
             alliance,
-            tags: tags.map((tag) => ({
-                index: resolveSegmentEndIndex(tag.index),
-                name: String(tag.name || ""),
-                value: resolveTagValue(tag),
-            })),
+            segments: serializeSegments(),
+            tags: serializeTags(),
         };
         const pathServerReady = await (async () => {
             if (typeof checkPathServer !== "function") return true;
@@ -1323,43 +1397,22 @@ ${tagsBlock}
 };
 
 // ---- CONFIG ----
-public static double VELOCITY_IN_S = ${toFixed(velocity, 2)};
-public static double MAX_ACCEL_IN_S2 = ${toFixed(Number(maxAccel) || 0, 2)};
-public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
-    }, [pathPoints, startPose, tags, velocity, maxAccel, tolerance, globalVars]);
+public static double MAX_ACCEL_IN_S2 = ${toFixed(Number(maxAccel) || 0, 2)};`;
+    }, [pathPoints, startPose, tags, maxAccel, globalVars]);
 
     const buildSerializable = () => ({
-        version: 1,
+        version: PATH_FILE_VERSION,
         createdAt: new Date().toISOString(),
         alliance,
         start: {x: num(startPose.x), y: num(startPose.y), h: num(startPose.h)},
         points: pathPoints.map((p) => ({x: Number(p.x), y: Number(p.y), h: Number(p.h ?? 0)})),
-        segments: segments.map((segment) => ({
-            type: segment.type,
-            headingMode: segment.headingMode,
-            end: segment.end ? {x: Number(segment.end.x), y: Number(segment.end.y), h: Number(segment.end.h ?? 0)} : undefined,
-            control: segment.control ? {x: Number(segment.control.x), y: Number(segment.control.y)} : undefined,
-            mid: segment.mid ? {x: Number(segment.mid.x), y: Number(segment.mid.y)} : undefined,
-            samples: Array.isArray(segment.samples)
-                ? segment.samples.map((sample) => ({
-                    x: Number(sample.x),
-                    y: Number(sample.y),
-                    h: Number(sample.h ?? 0),
-                }))
-                : [],
-        })),
+        segments: serializeSegments(),
         headingMode,
         endHeading: endHeadingValue,
-        velocity: Number(velocity) || 0,
         maxAccel: Number(maxAccel) || 0,
-        tolerance: Number(tolerance) || 0,
         snapInches: Number(snapInches) || 0,
         robot: {...robotDimensions},
-        tags: tags.map((t) => ({
-            index: resolveSegmentEndIndex(t.index),
-            name: String(t.name || ""),
-            value: resolveTagValue(t),
-        })),
+        tags: serializeTags(),
         globals: globalVars.map((entry) => ({name: entry.name, value: Number(entry.value) || 0})),
         tagBindings: tags
             .map((tag, idx) => (tag.globalName ? {tagIndex: idx, globalName: tag.globalName} : null))
@@ -1384,7 +1437,8 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
         URL.revokeObjectURL(url);
     };
 
-    const applyImportedData = (data) => {
+    const applyImportedData = (rawData) => {
+            const data = migrateImportedData(rawData);
             const getNum = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
             const computeEndIndices = (segmentsList) => {
                 let cursor = -1;
@@ -1406,7 +1460,7 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                 if (!Array.isArray(segmentList)) return [];
                 return segmentList.map((segment) => {
                     const type = typeof segment.type === "string" ? segment.type : "line";
-                    const headingModeOverride = typeof segment.headingMode === "string" ? segment.headingMode : undefined;
+                    const headingModeOverride = normalizeHeadingMode(segment.headingMode, data.headingMode);
                     const end = segment.end ?? {};
                     const rawSamples = Array.isArray(segment.samples) ? segment.samples : [];
                     const samples = rawSamples
@@ -1449,16 +1503,19 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                     .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
                     .map((point) => ({
                         type: "line",
+                        headingMode: normalizeHeadingMode(data.headingMode),
                         end: {x: point.x, y: point.y, h: point.h},
                         samples: [{x: point.x, y: point.y, h: point.h}],
                     }));
                 setSegmentsWithoutModal(importedSegments);
             }
-            if (typeof data.headingMode === "string") setHeadingMode(data.headingMode);
+            if (typeof data.headingMode === "string") setHeadingMode(normalizeHeadingMode(data.headingMode));
             if (Number.isFinite(Number(data.endHeading))) setEndHeading(String(Number(data.endHeading)));
-            if (Number.isFinite(Number(data.velocity))) setVelocity(String(Number(data.velocity)));
+            // previewSpeed only lives in the autosave; exported files never carry it.
+            if (Number.isFinite(Number(data.previewSpeed)) && Number(data.previewSpeed) > 0) {
+                setPreviewSpeed(String(Number(data.previewSpeed)));
+            }
             if (Number.isFinite(Number(data.maxAccel))) setMaxAccel(String(Number(data.maxAccel)));
-            if (Number.isFinite(Number(data.tolerance))) setTolerance(String(Number(data.tolerance)));
             if (Number.isFinite(Number(data.snapInches))) setSnapInches(String(Number(data.snapInches)));
             if (data.robot && typeof data.robot === "object") setRobotDimensions({...robotDimensions, ...data.robot});
             if (Array.isArray(data.globals)) {
@@ -1470,12 +1527,20 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
             if (Array.isArray(data.tags)) {
                 let importedTags = data.tags.map((t) => ({
                     index: getNum(t.index),
+                    segment: Number.isFinite(Number(t.segment)) ? Math.trunc(Number(t.segment)) : undefined,
                     name: String(t.name || ""),
                     value: getNum(t.value),
                 }));
                 if (importedSegments?.length) {
                     const endIndices = computeEndIndices(importedSegments);
+                    const segmentCount = importedSegments.length;
                     importedTags = importedTags.map((tag) => {
+                        // Version 2 files name the segment directly; the
+                        // expanded point index is only a fallback for v1 files.
+                        if (tag.segment !== undefined) {
+                            const resolved = tag.segment < 0 ? 0 : Math.min(segmentCount, tag.segment + 1);
+                            return {...tag, index: resolved};
+                        }
                         const expandedIndex = getNum(tag.index);
                         if (!Number.isFinite(expandedIndex) || expandedIndex <= 0) return tag;
                         let segmentIndex = endIndices.findIndex((endIndex) => endIndex + 1 === expandedIndex);
@@ -1486,6 +1551,12 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                         return {...tag, index: resolved};
                     });
                 }
+                // "segment" is derived from index on export; keep state tags lean.
+                importedTags = importedTags.map((tag) => {
+                    const cleaned = {...tag};
+                    delete cleaned.segment;
+                    return cleaned;
+                });
                 if (Array.isArray(data.tagBindings)) {
                     data.tagBindings.forEach((binding) => {
                         const tagIndex = getNum(binding.tagIndex, -1);
@@ -1539,6 +1610,7 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
 
     const setupInitialSettings = useMemo(() => ({
         fieldSize,
+        fieldImage,
         showGrid,
         gridStep,
         gridStepEntry,
@@ -1550,7 +1622,7 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
         panelOpacity,
         cardOpacity,
         uiScale,
-    }), [fieldSize, showGrid, gridStep, gridStepEntry, robotDimensions, palette, themeName, uiStyle, blurStrength, panelOpacity, cardOpacity, uiScale]);
+    }), [fieldSize, fieldImage, showGrid, gridStep, gridStepEntry, robotDimensions, palette, themeName, uiStyle, blurStrength, panelOpacity, cardOpacity, uiScale]);
 
     const exportDefaultName = `${alliance}_path_${new Date().toISOString().slice(0, 10)}`;
 
@@ -1594,12 +1666,10 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                 setHeadingMode={setHeadingMode}
                 endHeading={endHeading}
                 setEndHeading={setEndHeading}
-                velocity={velocity}
-                setVelocity={setVelocity}
+                previewSpeed={previewSpeed}
+                setPreviewSpeed={setPreviewSpeed}
                 maxAccel={maxAccel}
                 setMaxAccel={setMaxAccel}
-                tolerance={tolerance}
-                setTolerance={setTolerance}
                 snapInches={snapInches}
                 setSnapInches={setSnapInches}
                 startPose={startPose}
@@ -1722,7 +1792,6 @@ public static double TOLERANCE_IN = ${toFixed(Number(tolerance) || 0, 2)};`;
                 onStop={handleStop}
                 pointsCount={displayPoints.length}
                 totalLength={totalLength}
-                velocity={velocity}
                 playDist={playDist}
                 code={code}
                 onUndo={undoLast}

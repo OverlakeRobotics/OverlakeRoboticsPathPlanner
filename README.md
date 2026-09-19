@@ -18,12 +18,15 @@ Optional: Edit `config.js` (next to `index.html`) to customize defaults and tag 
 ### Path building
 - Place points by clicking on the field
 - Choose segment types: Line, Bezier, Arc, or Free draw
+- Pick a heading strategy per segment: Straight (turn to a set heading) or Tangent (face along the path)
 - Switch alliance (Red/Blue) or mirror the path with one click
+- Field image: BIOBUZZ (2026-27, default) or DECODE (2025-26), selectable in Setup. Both share the same 144 in coordinate frame.
 
 ### Fast upload
 - Connect to your robot's wifi and upload paths instantly
 - Real time pose updating to see the robot position on screen
 - Requires code from https://github.com/OverlakeRobotics/OverlakeRoboticsLibrary to be on the robot for direct upload and pose updating
+- Uploads send the path as segments (line / bezier / arc with an explicit heading mode) for the Pedro Pathing follower, plus the sampled points for live drawing. There is no global velocity or tolerance any more: speed is set with `velocity` tags and the follower owns its own tolerances.
 
 ### Edit mode
 - Select and drag points directly on the field
@@ -31,9 +34,10 @@ Optional: Edit `config.js` (next to `index.html`) to customize defaults and tag 
 - Reorder points by dragging them in the points list
 
 ### Tags
-Tags are metadata on points that the robot can read (velocity changes, waits, launch artifacts, etc.)
+Tags are metadata on points that the robot can read (speed changes, waits, launch artifacts, etc.)
 - Add tags to any point from the right panel
-- Tags are run once the robot reaches the point the tag is attached to
+- Tags are run once the robot reaches the point the tag is attached to (each tag also records which segment it ends)
+- `velocity` is a percent of the robot's max speed (0-100, default 100). Paths run at 100% until a `velocity` tag says otherwise.
 - You can edit the code in your robots OpMode to change what each tag does
 - Tags use templates from `config.js`, including units and defaults
 
@@ -44,8 +48,8 @@ Global variables let you update many tag values from a single number.
 - Change the global and all linked tags update automatically
 
 ### Import / Export
-- Export paths as JSON for sharing or later edits.
-- Reimport JSON to restore points, tags, and global variables.
+- Export paths as JSON (version 2) for sharing or later edits.
+- Reimport JSON to restore points, tags, and global variables. Version 1 files still import: their global velocity/tolerance are dropped and Orthogonal heading modes become Tangent.
 - Design an OpMode to run directly from the JSON or use code from https://github.com/OverlakeRobotics/OverlakeRoboticsLibrary
 
 ## Notes

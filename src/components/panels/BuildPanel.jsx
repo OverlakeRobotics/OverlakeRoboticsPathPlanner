@@ -18,13 +18,10 @@ export default function BuildPanel({
                                        setHeadingMode,
                                        endHeading,
                                        setEndHeading,
-                                       velocity,
-                                       setVelocity,
-                                       // NEW:
+                                       previewSpeed,
+                                       setPreviewSpeed,
                                        maxAccel,
                                        setMaxAccel,
-                                       tolerance,
-                                       setTolerance,
                                        snapInches,
                                        setSnapInches,
                                        startPose,
@@ -232,8 +229,6 @@ export default function BuildPanel({
                     <div className="button-group compact" id="heading-card">
                         <SegmentButton label="Straight" active={headingMode === "straight"} onClick={() => setHeadingMode("straight")} />
                         <SegmentButton label="Tangent" active={headingMode === "tangent"} onClick={() => setHeadingMode("tangent")} />
-                        <SegmentButton label="Orthogonal L" active={headingMode === "orth-left"} onClick={() => setHeadingMode("orth-left")} />
-                        <SegmentButton label="Orthogonal R" active={headingMode === "orth-right"} onClick={() => setHeadingMode("orth-right")} />
                     </div>
                     {headingMode === "straight" && (
                         <div className="field" style={{marginTop: "10px"}}>
@@ -311,21 +306,18 @@ export default function BuildPanel({
                 onKeyDown={(event) => handleToggleKey(event, "motion")}
             >
                 <div>
-                    <h3>Motion & Placement</h3>
-                    <p>Match drivetrain performance and snapping preferences.</p>
+                    <h3>Preview & Placement</h3>
+                    <p>Playback estimate and snapping preferences. Speed on the robot is set with velocity tags.</p>
                 </div>
                 <span className="collapse-caret">{openSections.motion ? "\u25BE" : "\u25B8"}</span>
             </div>
             {openSections.motion && (
                 <div className="field-grid" id="motion-card">
-                    <Field label="Velocity (in/s)">
-                        <input type="number" min={1} max={200} step={1} value={velocity} onChange={(event) => setVelocity(event.target.value)} />
+                    <Field label="Preview speed (in/s)">
+                        <input type="number" min={1} max={200} step={1} value={previewSpeed} onChange={(event) => setPreviewSpeed(event.target.value)} />
                     </Field>
                     <Field label="Max accel (in/s^2)">
                         <input type="number" min={1} max={400} step={1} value={maxAccel} onChange={(event) => setMaxAccel(event.target.value)} />
-                    </Field>
-                    <Field label="Tolerance (in)">
-                        <input type="number" min={0} step={0.1} value={tolerance} onChange={(event) => setTolerance(event.target.value)} />
                     </Field>
                     <Field label="Snap (in)">
                         <input type="number" min={0} step={0.1} value={snapInches} onChange={(event) => setSnapInches(event.target.value)} />

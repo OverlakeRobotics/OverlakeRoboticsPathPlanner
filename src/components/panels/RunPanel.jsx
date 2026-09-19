@@ -37,7 +37,6 @@ export default function RunPanel({
                                      onStop,
                                      pointsCount,
                                      totalLength,
-                                     velocity,
                                      playDist,
                                      code,
                                      onUndo,
@@ -239,6 +238,15 @@ export default function RunPanel({
         }
         return Number(tag?.value) || 0;
     };
+
+    // "velocity" tags are a percent of the robot's max speed (0-100).
+    const isPercentTag = (name) => String(name || "").trim() === "velocity";
+    const clampTagValue = (name, value) => {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) return 0;
+        return isPercentTag(name) ? Math.max(0, Math.min(100, numeric)) : numeric;
+    };
+    const tagValueBounds = (name) => (isPercentTag(name) ? {min: 0, max: 100, step: 1} : {step: 0.1});
 
     const clampTagIndex = (value, fallback) => {
         const parsed = Number(value);
@@ -735,8 +743,9 @@ export default function RunPanel({
                                                                             ) : (
                                                                                 <input
                                                                                     type="number"
+                                                                                    {...tagValueBounds(editName)}
                                                                                     value={editValue}
-                                                                                    onChange={(e) => setEditValue(Number(e.target.value))}
+                                                                                    onChange={(e) => setEditValue(clampTagValue(editName, e.target.value))}
                                                                                 />
                                                                             )}
                                                                         </div>
@@ -748,7 +757,7 @@ export default function RunPanel({
                                                                                 if (editName.trim() && onEditTag) {
                                                                                     const globalName = editValueSource === "global" ? editGlobalName : undefined;
                                                                                     if (editValueSource !== "global" || globalName) {
-                                                                                        onEditTag(tag.originalIndex, editName.trim(), editValue, editPointIndex, globalName);
+                                                                                        onEditTag(tag.originalIndex, editName.trim(), clampTagValue(editName, editValue), editPointIndex, globalName);
                                                                                     }
                                                                                 }
                                                                                 setEditingIndex(null);
@@ -891,9 +900,12 @@ export default function RunPanel({
                                                         ) : (
                                                             <input
                                                                 type="number"
-                                                                step="0.1"
+                                                                {...tagValueBounds(newTagName)}
                                                                 value={newTagValue}
-                                                                onChange={(e) => setNewTagValue(e.target.value)}
+                                                                onChange={(e) => {
+                                                                    const raw = e.target.value;
+                                                                    setNewTagValue(raw === "" || raw === "-" ? raw : String(clampTagValue(newTagName, raw)));
+                                                                }}
                                                                 placeholder="0"
                                                             />
                                                         )}
@@ -904,7 +916,7 @@ export default function RunPanel({
                                                         className="btn primary"
                                                         onClick={() => {
                                                             if (newTagName.trim() && onAddTag) {
-                                                                const value = Number(newTagValue) || 0;
+                                                                const value = clampTagValue(newTagName, newTagValue);
                                                                 const index = clampTagIndex(newTagPointIndex, 0);
                                                                 const globalName = newTagValueSource === "global" ? newTagGlobalName : undefined;
                                                                 if (newTagValueSource !== "global" || globalName) {
@@ -1038,8 +1050,6 @@ export default function RunPanel({
                                                             >
                                                                 <option value="straight">Straight</option>
                                                                 <option value="tangent">Tangent</option>
-                                                                <option value="orth-left">Orthogonal L</option>
-                                                                <option value="orth-right">Orthogonal R</option>
                                                             </select>
                                                         </div>
                                                     </div>
@@ -1167,8 +1177,9 @@ export default function RunPanel({
                                                                             ) : (
                                                                                 <input
                                                                                     type="number"
+                                                                                    {...tagValueBounds(editName)}
                                                                                     value={editValue}
-                                                                                    onChange={(e) => setEditValue(Number(e.target.value))}
+                                                                                    onChange={(e) => setEditValue(clampTagValue(editName, e.target.value))}
                                                                                 />
                                                                             )}
                                                                         </div>
@@ -1180,7 +1191,7 @@ export default function RunPanel({
                                                                                 if (editName.trim() && onEditTag) {
                                                                                     const globalName = editValueSource === "global" ? editGlobalName : undefined;
                                                                                     if (editValueSource !== "global" || globalName) {
-                                                                                        onEditTag(tag.originalIndex, editName.trim(), editValue, editPointIndex, globalName);
+                                                                                        onEditTag(tag.originalIndex, editName.trim(), clampTagValue(editName, editValue), editPointIndex, globalName);
                                                                                     }
                                                                                 }
                                                                                 setEditingIndex(null);
@@ -1324,9 +1335,12 @@ export default function RunPanel({
                                                         ) : (
                                                             <input
                                                                 type="number"
-                                                                step="0.1"
+                                                                {...tagValueBounds(newTagName)}
                                                                 value={newTagValue}
-                                                                onChange={(e) => setNewTagValue(e.target.value)}
+                                                                onChange={(e) => {
+                                                                    const raw = e.target.value;
+                                                                    setNewTagValue(raw === "" || raw === "-" ? raw : String(clampTagValue(newTagName, raw)));
+                                                                }}
                                                                 placeholder="0"
                                                             />
                                                         )}
@@ -1337,7 +1351,7 @@ export default function RunPanel({
                                                         className="btn primary"
                                                         onClick={() => {
                                                             if (newTagName.trim() && onAddTag) {
-                                                                const value = Number(newTagValue) || 0;
+                                                                const value = clampTagValue(newTagName, newTagValue);
                                                                 const index = Math.max(1, Math.min(pointsCount, Number(newTagPointIndex) || pointIndex + 1));
                                                                 const globalName = newTagValueSource === "global" ? newTagGlobalName : undefined;
                                                                 if (newTagValueSource !== "global" || globalName) {

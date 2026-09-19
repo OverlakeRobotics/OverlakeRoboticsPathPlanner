@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import {
     FIELD_SIZE_IN,
+    DEFAULT_FIELD_IMAGE,
     GRID_DEFAULT_STEP,
     DEFAULT_ROBOT_DIMENSIONS,
     PATH_COLOR,
@@ -11,6 +12,7 @@ import {
     PREVIEW_FILL
 } from "../constants/config";
 import { THEME_PRESETS } from "../constants/themes";
+import { FIELD_IMAGE_OPTIONS, resolveFieldImageKey } from "../constants/fieldImages";
 import ThemePresetCard from "./ThemePresetCard";
 
 const DEFAULT_PALETTE = {
@@ -27,6 +29,7 @@ export default function SetupModal({ isOpen, onClose, onSave, initialSettings })
     
     // General Settings
     const [fieldSize, setFieldSize] = useState(FIELD_SIZE_IN);
+    const [fieldImage, setFieldImage] = useState(resolveFieldImageKey(DEFAULT_FIELD_IMAGE));
     const [showGrid, setShowGrid] = useState(true);
     const [gridStepEntry, setGridStepEntry] = useState(String(GRID_DEFAULT_STEP));
     const [robotDimensions, setRobotDimensions] = useState({...DEFAULT_ROBOT_DIMENSIONS});
@@ -58,6 +61,7 @@ export default function SetupModal({ isOpen, onClose, onSave, initialSettings })
         const settings = initialSettingsRef.current;
         if (!settings) return;
         setFieldSize(settings.fieldSize || FIELD_SIZE_IN);
+        setFieldImage(resolveFieldImageKey(settings.fieldImage, DEFAULT_FIELD_IMAGE));
         setShowGrid(Boolean(settings.showGrid));
         const step = Number(settings.gridStep);
         const nextStep = Number.isFinite(step) && step > 0 ? step : GRID_DEFAULT_STEP;
@@ -108,6 +112,7 @@ export default function SetupModal({ isOpen, onClose, onSave, initialSettings })
             : FIELD_SIZE_IN;
         onSave({
             fieldSize: resolvedField,
+            fieldImage: resolveFieldImageKey(fieldImage, DEFAULT_FIELD_IMAGE),
             showGrid,
             gridStep: resolvedStep,
             gridStepEntry: String(resolvedStep),
@@ -128,6 +133,7 @@ export default function SetupModal({ isOpen, onClose, onSave, initialSettings })
 
     const handleReset = () => {
         setFieldSize(FIELD_SIZE_IN);
+        setFieldImage(resolveFieldImageKey(DEFAULT_FIELD_IMAGE));
         setShowGrid(true);
         setGridStepEntry(String(GRID_DEFAULT_STEP));
         setRobotDimensions({...DEFAULT_ROBOT_DIMENSIONS});
@@ -199,6 +205,15 @@ export default function SetupModal({ isOpen, onClose, onSave, initialSettings })
 
                             <div className="modal-section">
                                 <h3>Field Geometry</h3>
+                                <div className="field">
+                                    <label>Field image</label>
+                                    <select value={fieldImage} onChange={(e) => setFieldImage(e.target.value)}>
+                                        {FIELD_IMAGE_OPTIONS.map((option) => (
+                                            <option key={option.key} value={option.key}>{option.label}</option>
+                                        ))}
+                                    </select>
+                                    <span className="field-hint">Season field render drawn under the path. Coordinates are the same for every image.</span>
+                                </div>
                                 <div className="field">
                                     <label>Field Size (inches)</label>
                                     <input

@@ -1,6 +1,6 @@
 window.__APP_CONFIG__ = {
   TAG_TEMPLATES: [
-      { name: "velocity", defaultValue: 50, unit: "in/s" },
+      { name: "velocity", defaultValue: 100, unit: "%" },
       { name: "pause", defaultValue: 1, unit: "seconds" },
       { name: "intake", defaultValue: 0, unit: "ticks/s" },
       { name: "autoAim", defaultValue: 0, unit: "" },
@@ -17,8 +17,7 @@ window.__APP_CONFIG__ = {
   GRID_DEFAULT_STEP: 24,
   GRID_MIN_STEP: 0.25,
   DEFAULT_SNAP_IN: 3,
-  DEFAULT_TOLERANCE_IN: 5,
-  DEFAULT_VELOCITY_IN_PER_S: 30,
+  DEFAULT_FIELD_IMAGE: "biobuzz",
   DEFAULT_PLAYBACK_SPEED_IN_PER_S: 30,
   DEFAULT_MAX_ACCEL_IN_PER_S2: 40,
   SPEED_PROFILE_SAMPLE_STEP_IN: 1,

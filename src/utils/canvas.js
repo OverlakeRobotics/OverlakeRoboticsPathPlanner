@@ -5,7 +5,7 @@ import {
     DRAW_RAW_COLOR,
     DRAW_FIT_COLOR,
 } from "../constants/config";
-import {headingVector, perpendicularHeading} from "./geometry";
+import {headingVector} from "./geometry";
 import {canvasToWorld, headingFromDelta, rotateLocalToWorld, snapToField, worldToCanvas} from "./geometry";
 import {getSegmentProgress, polylineLength, sampleCircularArcThrough, sampleQuadraticBezier} from "./path";
 import {computeDrawCandidates} from "./drawFit";
@@ -677,8 +677,6 @@ const interpolateHeading = (index, t, startPose, points) => {
 const resolvePreviewHeading = (headingMode, tangent, endHeading, anchor) => {
     const magnitude = Math.hypot(tangent.dx ?? 0, tangent.dy ?? 0);
     if (headingMode === "tangent" && magnitude > 1e-6) return headingFromDelta(tangent.dx, tangent.dy);
-    if (headingMode === "orth-left" && magnitude > 1e-6) return perpendicularHeading(tangent.dx, tangent.dy, true);
-    if (headingMode === "orth-right" && magnitude > 1e-6) return perpendicularHeading(tangent.dx, tangent.dy, false);
     if (headingMode === "straight") return endHeading;
     return num(anchor?.h ?? 0);
 };
@@ -1620,8 +1618,6 @@ const computeHeadingFromMode = (headingMode, tangent, prev, straightHeading) => 
     const dy = tangent.dy ?? 0;
     if (headingMode === "straight") return straightHeading;
     if (headingMode === "tangent") return headingFromDelta(dx, dy);
-    if (headingMode === "orth-left") return perpendicularHeading(dx, dy, true);
-    if (headingMode === "orth-right") return perpendicularHeading(dx, dy, false);
     return prev?.h ?? 0;
 };
 
@@ -1632,8 +1628,6 @@ export const buildHeadingResolver = ({headingMode, endHeading, startPose, points
     const dy = y - anchor.y;
     if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) return 0;
     if (headingMode === "tangent") return headingFromDelta(dx, dy);
-    if (headingMode === "orth-left") return perpendicularHeading(dx, dy, true);
-    if (headingMode === "orth-right") return perpendicularHeading(dx, dy, false);
     return 0;
 };
 

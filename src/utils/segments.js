@@ -1,14 +1,23 @@
-import {headingFromDelta, perpendicularHeading} from "./geometry";
+import {headingFromDelta} from "./geometry";
 import {normDeg, shortestDeltaDeg} from "./math";
 import {sampleCircularArcThrough, sampleQuadraticBezier} from "./path";
+
+export const HEADING_MODES = ["straight", "tangent"];
+
+// Resolve any stored/imported heading mode to one the follower understands.
+// Legacy "orth-left" / "orth-right" collapse to "tangent"; anything unknown
+// falls back to "straight".
+export const normalizeHeadingMode = (mode, fallback = "straight") => {
+    if (mode === "straight" || mode === "tangent") return mode;
+    if (mode === "orth-left" || mode === "orth-right") return "tangent";
+    return HEADING_MODES.includes(fallback) ? fallback : "straight";
+};
 
 export const computeHeadingFromMode = (headingMode, tangent, prev, straightHeading) => {
     const dx = tangent?.dx ?? 0;
     const dy = tangent?.dy ?? 0;
     if (headingMode === "straight") return straightHeading;
     if (headingMode === "tangent") return headingFromDelta(dx, dy);
-    if (headingMode === "orth-left") return perpendicularHeading(dx, dy, true);
-    if (headingMode === "orth-right") return perpendicularHeading(dx, dy, false);
     return prev?.h ?? 0;
 };
 
@@ -55,6 +64,7 @@ export const buildLineSegment = ({anchor, end, headingMode, endHeading, endHeadi
     const last = samples[samples.length - 1];
     return {
         type: "line",
+        headingMode,
         end: {x: last.x, y: last.y, h: last.h},
         samples,
     };
@@ -69,6 +79,7 @@ export const buildBezierSegment = ({anchor, control, end, headingMode, endHeadin
     const last = samples[samples.length - 1];
     return {
         type: "bezier",
+        headingMode,
         control: {x: control.x, y: control.y},
         end: {x: last.x, y: last.y, h: last.h},
         samples,
@@ -84,6 +95,7 @@ export const buildArcSegment = ({anchor, mid, end, headingMode, endHeading, endH
     const last = samples[samples.length - 1];
     return {
         type: "arc",
+        headingMode,
         mid: {x: mid.x, y: mid.y},
         end: {x: last.x, y: last.y, h: last.h},
         samples,
