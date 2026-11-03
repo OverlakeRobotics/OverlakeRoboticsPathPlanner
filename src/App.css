@@ -261,6 +261,7 @@ textarea.code-box {
   margin: 0;
   font-size: 15px;
   letter-spacing: 0.3px;
+  white-space: nowrap;
 }
 
 .card-header p {
@@ -1651,6 +1652,67 @@ textarea.code-box::-webkit-scrollbar-thumb:hover {
 }
 
 /* Run panel hierarchy */
+.robot-conn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.conn-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--danger);
+  box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.15);
+}
+
+.conn-dot.on {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px rgba(107, 230, 117, 0.15);
+}
+
+.conn-label {
+  font-weight: 600;
+}
+
+.conn-meta {
+  margin-left: auto;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.conn-label + .state-chip {
+  margin-left: auto;
+}
+
+.state-chip {
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.state-chip.state-running {
+  color: var(--ok);
+  background: rgba(107, 230, 117, 0.14);
+}
+
+.state-chip.state-init {
+  color: var(--warn);
+  background: rgba(255, 209, 102, 0.14);
+}
+
+.run-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+}
+
 .control-card.run-primary {
   border: 1px solid rgba(92, 210, 255, 0.35);
   background: rgba(92, 210, 255, 0.06);

@@ -1,12 +1,8 @@
 window.__APP_CONFIG__ = {
   TAG_TEMPLATES: [
       { name: "velocity", defaultValue: 100, unit: "%" },
-      { name: "pause", defaultValue: 1, unit: "seconds" },
-      { name: "intake", defaultValue: 0, unit: "ticks/s" },
-      { name: "autoAim", defaultValue: 0, unit: "" },
-      { name: "shooterVelocity", defaultValue: 0, unit: "ticks/s" },
-      { name: "hoodAngle", defaultValue: 0, unit: "degrees" },
-      { name: "launchArtifacts", defaultValue: 1, unit: "seconds" }
+      { name: "pause", defaultValue: 1, unit: "seconds", dwell: true },
+      { name: "intake", defaultValue: 1000, unit: "ticks/s" }
   ],
   FIELD_SIZE_IN: 144,
   DEFAULT_CANVAS_SIZE: 720,
@@ -17,6 +13,7 @@ window.__APP_CONFIG__ = {
   GRID_DEFAULT_STEP: 24,
   GRID_MIN_STEP: 0.25,
   DEFAULT_SNAP_IN: 3,
+  DEFAULT_OP_MODE: "Path Planning Example",
   DEFAULT_FIELD_IMAGE: "biobuzz",
   DEFAULT_PLAYBACK_SPEED_IN_PER_S: 30,
   DEFAULT_MAX_ACCEL_IN_PER_S2: 40,

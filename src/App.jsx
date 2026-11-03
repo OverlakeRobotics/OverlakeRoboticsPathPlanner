@@ -31,6 +31,8 @@ import {
     SPEED_PROFILE_SAMPLE_STEP_IN,
     UPLOAD_RESET_FAIL_MS,
     UPLOAD_RESET_OK_MS,
+    TAG_TEMPLATES,
+    DEFAULT_OP_MODE,
 } from "./constants/config";
 import {usePosePolling} from "./hooks/usePosePolling";
 import {usePlayback} from "./hooks/usePlayback";
@@ -81,14 +83,21 @@ function wrapAngleRad(a) {
 // make the estimate infinite.
 const PREVIEW_MIN_SPEED_IN_S = 1;
 
-const EMPTY_PROFILE = {s: [0], v: [0], t: [0], totalLen: 0, totalTime: 0, sOfT: () => 0};
+const EMPTY_PROFILE = {
+    s: [0], v: [0], t: [0], totalLen: 0, totalTime: 0, drivingTime: 0, stopTime: 0, sOfT: () => 0,
+};
+
+// Tags that hold the robot at their node for `value` seconds (`dwell: true` in config.js).
+const isDwellTag = (name) => TAG_TEMPLATES.some((template) => template.name === name && template.dwell);
 
 // Trapezoidal speed profile over the sampled path. Every waypoint edge has its
 // own cruise cap (robot max speed scaled by the velocity tag in effect for its
 // segment and by how much of the motion is a strafe), curvature limits speed
 // through turns, and the forward/backward passes use the robot's acceleration
-// and deceleration limits. The robot starts and ends at rest.
-function buildSpeedProfile(waypoints, {edgeCruise = [], fallbackCruise, accel, decel} = {}) {
+// and deceleration limits. The robot starts and ends at rest, and `stops`
+// ([{waypoint, seconds}]) hold it at rest at a node for that long before it
+// moves on, so the time axis includes the dwell and the ghost visibly waits.
+function buildSpeedProfile(waypoints, {edgeCruise = [], fallbackCruise, accel, decel, stops = []} = {}) {
     const amax = Math.max(EPS, Number(accel) || 0);
     const dmax = Math.max(EPS, Number(decel) || amax);
     const fallback = Math.max(PREVIEW_MIN_SPEED_IN_S, Number(fallbackCruise) || 0);
@@ -124,10 +133,14 @@ function buildSpeedProfile(waypoints, {edgeCruise = [], fallbackCruise, accel, d
     const s = [0];
     const kappa = [kappaVertex[0]];
     const edgeOf = [0];
+    const sampleOfWaypoint = [0];
     let accS = 0;
     for (let i = 0; i < N - 1; i++) {
         const L = segLen[i];
-        if (L < EPS) continue;
+        if (L < EPS) {
+            sampleOfWaypoint.push(s.length - 1);
+            continue;
+        }
         const steps = Math.max(1, Math.round(L / SPEED_PROFILE_SAMPLE_STEP_IN));
         for (let j = 1; j <= steps; j++) {
             const alpha = j / steps;
@@ -135,9 +148,19 @@ function buildSpeedProfile(waypoints, {edgeCruise = [], fallbackCruise, accel, d
             kappa.push((1 - alpha) * kappaVertex[i] + alpha * kappaVertex[i + 1]);
             edgeOf.push(i);
         }
+        sampleOfWaypoint.push(s.length - 1);
         accS += L;
     }
     const M = s.length;
+
+    // Dwell per sample, from stops at waypoint nodes.
+    const dwell = new Array(M).fill(0);
+    stops.forEach((stop) => {
+        const seconds = Number(stop?.seconds) || 0;
+        const sample = sampleOfWaypoint[Math.trunc(Number(stop?.waypoint))];
+        if (seconds <= 0 || !Number.isFinite(sample)) return;
+        dwell[sample] += seconds;
+    });
 
     const v = new Array(M);
     for (let i = 0; i < M; i++) {
@@ -147,6 +170,9 @@ function buildSpeedProfile(waypoints, {edgeCruise = [], fallbackCruise, accel, d
     }
     v[0] = 0;
     v[M - 1] = 0;
+    for (let i = 0; i < M; i++) {
+        if (dwell[i] > 0) v[i] = 0; // stopped at the node, accelerates again after
+    }
 
     for (let i = 1; i < M; i++) {
         const ds = s[i] - s[i - 1];
@@ -157,29 +183,37 @@ function buildSpeedProfile(waypoints, {edgeCruise = [], fallbackCruise, accel, d
         v[i] = Math.min(v[i], Math.sqrt(v[i + 1] * v[i + 1] + 2 * dmax * ds));
     }
 
+    // t = arrival time at each sample; the robot leaves at t + dwell.
     const t = new Array(M).fill(0);
+    const tDepart = new Array(M).fill(0);
+    tDepart[0] = dwell[0];
     for (let i = 1; i < M; i++) {
         const ds = s[i] - s[i - 1];
         const vAvg = Math.max(EPS, 0.5 * (v[i] + v[i - 1]));
-        t[i] = t[i - 1] + ds / vAvg;
+        t[i] = tDepart[i - 1] + ds / vAvg;
+        tDepart[i] = t[i] + dwell[i];
     }
-    const totalTime = t[M - 1];
+    const totalTime = tDepart[M - 1];
+    const stopTime = dwell.reduce((sum, d) => sum + d, 0);
+    const drivingTime = Math.max(0, totalTime - stopTime);
 
     function sOfT(time) {
         if (time <= 0) return 0;
         if (time >= totalTime) return totalLen;
+        // largest sample already reached
         let lo = 0, hi = M - 1;
         while (hi - lo > 1) {
             const mid = (lo + hi) >> 1;
             if (t[mid] <= time) lo = mid;
             else hi = mid;
         }
-        const dt = t[hi] - t[lo];
-        const alpha = dt > EPS ? (time - t[lo]) / dt : 0;
+        if (time < tDepart[lo] || lo === M - 1) return s[lo]; // holding at the node
+        const dt = t[hi] - tDepart[lo];
+        const alpha = dt > EPS ? (time - tDepart[lo]) / dt : 0;
         return s[lo] + alpha * (s[hi] - s[lo]);
     }
 
-    return {s, v, t, totalLen, totalTime, sOfT};
+    return {s, v, t, totalLen, totalTime, drivingTime, stopTime, sOfT};
 }
 
 const cloneSegments = (segments) =>
@@ -525,7 +559,9 @@ export default function App() {
                 maxStrafe: robotLimits.maxStrafeSpeedInS > 0 ? robotLimits.maxStrafeSpeedInS : robotLimits.maxSpeedInS,
                 accel,
                 accelFromRobot: robotLimits.maxAccelInS2 > 0,
-                decel: robotLimits.maxDecelInS2 > 0 ? robotLimits.maxDecelInS2 : accel,
+                // The robot's maxDecelInS2 is Pedro's coast-down figure, not active braking, so
+                // never brake slower than we accelerate.
+                decel: Math.max(robotLimits.maxDecelInS2 > 0 ? robotLimits.maxDecelInS2 : 0, accel),
             };
         }
         return {
@@ -583,14 +619,36 @@ export default function App() {
         });
     }, [pathPoints, waypoints, startPose.h, segmentEndIndices, segmentSpeedPercents, previewLimits]);
 
+    // Stops the robot makes along the route: dwell tags hold
+    // it for `value` seconds at their node, which is the end of the segment the
+    // tag sits at (start-pose tags hold before the robot moves). Values resolve
+    // through globals exactly as the upload does.
+    const previewStops = useMemo(() => {
+        const byWaypoint = new Map();
+        tags.forEach((tag) => {
+            const name = String(tag.name || "").trim();
+            if (!isDwellTag(name)) return;
+            const seconds = Math.max(0, resolveTagValueWith(tag, globalVars));
+            if (seconds <= 0) return;
+            const segment = tagSegmentIndex(tag.index, segments.length);
+            const waypoint = segment < 0 ? 0 : (segmentEndIndices[segment] ?? -1) + 1;
+            const entry = byWaypoint.get(waypoint) ?? {waypoint, point: segment + 1, seconds: 0, items: []};
+            entry.seconds += seconds;
+            entry.items.push({name, seconds});
+            byWaypoint.set(waypoint, entry);
+        });
+        return [...byWaypoint.values()].sort((a, b) => a.waypoint - b.waypoint);
+    }, [tags, globalVars, segments.length, segmentEndIndices]);
+
     const previewProfile = useMemo(
         () => buildSpeedProfile(waypoints, {
             edgeCruise: edgeCruiseSpeeds,
             fallbackCruise: previewLimits.maxSpeed,
             accel: previewLimits.accel,
             decel: previewLimits.decel,
+            stops: previewStops,
         }),
-        [waypoints, edgeCruiseSpeeds, previewLimits]
+        [waypoints, edgeCruiseSpeeds, previewLimits, previewStops]
     );
 
     const {
@@ -1345,7 +1403,7 @@ export default function App() {
         }
     };
 
-    const doUpload = async (targetOpMode = "Path Planner") => {
+    const doUpload = async (targetOpMode = DEFAULT_OP_MODE) => {
         if (uploadTimerRef.current) clearTimeout(uploadTimerRef.current);
         setUploadStatus("sending");
         const payload = {
@@ -1433,7 +1491,7 @@ export default function App() {
         throw lastError || new Error("Unknown upload error");
     };
 
-    const doInstantUploadInit = async (targetOpMode = "Path Planner") => {
+    const doInstantUploadInit = async (targetOpMode = DEFAULT_OP_MODE) => {
         // First request the robot to init the Path Planner op mode, then upload once the robot reports the op mode.
         try {
             setUploadStatus("sending");
@@ -1732,6 +1790,11 @@ ${tagsBlock}
     };
 
     const estRunTimeSeconds = previewProfile.totalTime;
+    const estTimeBreakdown = useMemo(() => ({
+        driving: previewProfile.drivingTime,
+        stopped: previewProfile.stopTime,
+        stops: previewStops,
+    }), [previewProfile, previewStops]);
 
     const setupInitialSettings = useMemo(() => ({
         fieldSize,
@@ -1943,6 +2006,7 @@ ${tagsBlock}
                 onUpdateSegmentMid={updateSegmentMid}
                 onUpdateSegmentHeadingMode={updateSegmentHeadingMode}
                 estTimeSec={estRunTimeSeconds}
+                estTimeBreakdown={estTimeBreakdown}
                 onExportPath={onExportPath}
                 onImportFile={onImportPath}
                 points={displayPoints}

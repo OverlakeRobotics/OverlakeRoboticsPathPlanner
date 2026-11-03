@@ -1,10 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
-import { TAG_TEMPLATES } from "../../constants/config";
-const uploadLabel = (status) =>
-    status === "sending" ? "Uploading..." : status === "ok" ? "Uploaded" : status === "fail" ? "Failed Upload" : "Upload";
-
-const uploadClass = (status) =>
-    status === "ok" ? "btn ok" : status === "fail" ? "btn danger" : status === "sending" ? "btn warn" : "btn primary";
+import { DEFAULT_OP_MODE, HUB_IP, TAG_TEMPLATES } from "../../constants/config";
 
 const runLabel = (status) =>
     status === "sending" ? "Queuing..." : status === "ok" ? "Queued" : status === "fail" ? "Failed Run" : "Run";
@@ -63,6 +58,7 @@ export default function RunPanel({
                                      onUpdateStartPose,
                                      // NEW:
                                      estTimeSec,
+                                     estTimeBreakdown,
                                      onExportPath,
                                      onImportFile,
                                      points,
@@ -86,6 +82,15 @@ export default function RunPanel({
                                  }) {
     const lengthDisplay = toFixed(totalLength, 1);
     const timeDisplay = Number.isFinite(estTimeSec) ? toFixed(estTimeSec, 1) : "0.0";
+    const stops = estTimeBreakdown?.stops ?? [];
+    const stopCount = stops.reduce((sum, stop) => sum + stop.items.length, 0);
+    const stopsTitle = stops
+        .map((stop) => {
+            const where = stop.point === 0 ? "Start" : `Point ${stop.point}`;
+            const parts = stop.items.map((item) => `${item.name} ${toFixed(item.seconds, 2)} s`).join(" + ");
+            return `${where}: ${parts}`;
+        })
+        .join("\n");
     const progress = totalLength > 0 ? Math.round((playDist / totalLength) * 100) : 0;
 
     const fileInputRef = useRef(null);
@@ -106,6 +111,7 @@ export default function RunPanel({
     // Selected op mode must be chosen before initializing the robot
     const [selectedOpMode, setSelectedOpMode] = useState("");
     const [opModeWarning, setOpModeWarning] = useState(null);
+    const [starting, setStarting] = useState(false);
     const opModeWarningTimerRef = useRef(null);
 
     const [isAddingTag, setIsAddingTag] = useState(false);
@@ -329,13 +335,16 @@ export default function RunPanel({
         }
     }, [robotStatus]);
 
-    // Initialize selectedOpMode to "Path Planner" by default, or first available opmode when list is loaded
+    // Start on DEFAULT_OP_MODE; once the robot reports its OpModes, fall back to
+    // another path OpMode (or the first one) if the selection isn't on this robot.
     useEffect(() => {
+        const list = robotConfig?.opModeList;
         if (!selectedOpMode) {
-            setSelectedOpMode("Path Planner");
-        } else if (robotConfig?.opModeList?.length > 0 && !robotConfig.opModeList.includes(selectedOpMode)) {
-            // If selectedOpMode is not in the list, switch to the first available
-            setSelectedOpMode(robotConfig.opModeList[0]);
+            setSelectedOpMode(DEFAULT_OP_MODE);
+        } else if (list?.length > 0 && !list.includes(selectedOpMode)) {
+            setSelectedOpMode(list.includes(DEFAULT_OP_MODE)
+                ? DEFAULT_OP_MODE
+                : list.find((m) => /path/i.test(m)) ?? list[0]);
         }
     }, [robotConfig?.opModeList, selectedOpMode]);
 
@@ -398,18 +407,37 @@ export default function RunPanel({
         }
     };
 
-    const handleInitStartClick = () => {
-        if (!initialized && !hasSentInit) {
-            setDebugMsg(`Sending INIT (${selectedOpMode})…`);
-            if (onInit) onInit(selectedOpMode);
-            setHasSentInit(true);
-            setTimeout(() => setDebugMsg(""), 1500);
-        } else {
+    // Start always re-sends the path first, so edits made after Init are never left behind.
+    // If the upload fails the OpMode is not started.
+    const handleStartClick = async () => {
+        clearOpModeWarning();
+        setStarting(true);
+        try {
+            setDebugMsg("Uploading latest path…");
+            if (onUpload) await onUpload(selectedOpMode);
             setDebugMsg("Starting…");
-            if (onStart) onStart();
+            if (onStart) await onStart();
+        } catch (e) {
+            console.error(e);
+            if (e?.code === 'PATH_SERVER_UNAVAILABLE') {
+                showOpModeWarning(`${e?.opModeName || selectedOpMode} is not running the Path Server. Please select a compatible OpMode.`);
+            }
+        } finally {
+            setStarting(false);
             setTimeout(() => setDebugMsg(""), 1500);
         }
     };
+
+    const isReady = initialized || hasSentInit;
+    const isBusy = uploadStatus === "sending" || starting;
+    const robotState = String(robotStatus?.status || "").toUpperCase();
+    const opModeOptions = robotConfig?.opModeList?.length > 0 ? robotConfig.opModeList : [selectedOpMode].filter(Boolean);
+    const activeOpMode = displayOpMode(robotStatus?.opMode);
+    const primaryLabel = starting
+        ? "Starting…"
+        : uploadStatus === "sending"
+            ? "Uploading…"
+            : isReady ? "▶ Start" : "Init & upload";
 
     return (
         <aside className="panel panel-run">
@@ -417,156 +445,84 @@ export default function RunPanel({
                 <h2>Run & Export</h2>
             </div>
             <div className="panel-body scroll-area">
-                <section className="control-card run-primary">
+                <section className="control-card">
                     <div className="card-header">
                         <h3>Robot Control</h3>
-                        <p>Upload the path, then init and start the OpMode.</p>
+                        <p>Init uploads the path; Start re-sends it and runs.</p>
                     </div>
-                    <div className="card-actions stack">
-                        {/* Primary Upload (INIT then Upload) */}
-                        {opModeWarning && (
-                            <div
-                                role="alert"
-                                style={{
-                                    background: 'rgba(248, 113, 113, 0.15)',
-                                    border: '1px solid rgba(248, 113, 113, 0.4)',
-                                    color: '#fecaca',
-                                    padding: '0.5rem',
-                                    borderRadius: '6px',
-                                    fontSize: '0.85rem',
-                                    textAlign: 'center',
-                                    marginBottom: '0.25rem'
-                                }}
-                            >
-                                {opModeWarning}
-                            </div>
+
+                    <div className="robot-conn" role="status">
+                        <span className={`conn-dot${isConnected ? " on" : ""}`} aria-hidden="true" />
+                        <span className="conn-label">{isConnected ? "Connected" : "Not connected"}</span>
+                        {isConnected && robotStatus?.battery != null && (
+                            <span className="conn-meta">{robotStatus.battery} V</span>
                         )}
-                        <button
-                            className={`${uploadClass(uploadStatus)} btn-lg`}
-                            onClick={handleUploadClick}
-                            disabled={uploadStatus === "sending" || !isConnected || pointsCount === 0}
-                            title={!isConnected
-                                ? "Connect to the robot WiFi first"
-                                : pointsCount === 0
-                                    ? "Place at least one point on the field first"
-                                    : undefined}
-                        >
-                            {uploadLabel(uploadStatus)}
-                        </button>
-
-                        {lastUpload?.state === "ok" && (
-                            <div className="status-line ok" role="status">
-                                <span>
-                                    ✓ {lastUpload.points} pts · {toFixed(lastUpload.length, 0)} in → {lastUpload.opMode} at {formatClock(lastUpload.at)}
-                                    {pathDirty && <em className="status-stale"> — path edited since upload</em>}
-                                </span>
-                                <button className="status-dismiss" onClick={onDismissUpload} aria-label="Dismiss upload status">×</button>
-                            </div>
+                        {isConnected && robotState && (
+                            <span className={`state-chip state-${robotState.split(/[^A-Z]/)[0].toLowerCase()}`}>
+                                {robotState}
+                            </span>
                         )}
-                        {lastUpload?.state === "fail" && (
-                            <div className="status-line fail" role="alert">
-                                <span>Upload failed: {lastUpload.reason}</span>
-                                <button className="status-dismiss" onClick={onDismissUpload} aria-label="Dismiss upload error">×</button>
-                            </div>
-                        )}
+                    </div>
 
-                        {/* Connection & Robot Status */}
-                        <div className="robot-status-panel" style={{
-                            background: isConnected ? 'rgba(74, 222, 128, 0.1)' : 'rgba(248, 113, 113, 0.1)',
-                            border: `1px solid ${isConnected ? 'rgba(74, 222, 128, 0.2)' : 'rgba(248, 113, 113, 0.2)'}`,
-                            borderRadius: '6px',
-                            padding: '0.75rem',
-                            marginTop: '0.5rem',
-                            marginBottom: '0.5rem'
-                        }}>
-                            {debugMsg && (
-                                <div style={{marginTop: '0.5rem', fontSize: '0.85rem', opacity: 0.9}}>
-                                    {debugMsg}
-                                </div>
-                            )}
-                            <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem'}}>
-                                <div style={{
-                                    width: '9px',
-                                    height: '9px',
-                                    borderRadius: '50%',
-                                    background: isConnected ? '#4ade80' : '#f87171',
-                                    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.5)'
-                                }} />
-                                <span style={{fontSize: '0.9rem', fontWeight: 500}}>
-                                    {isConnected ? "Connected to Robot" : "Disconnected"}
-                                </span>
+                    {isConnected ? (
+                        <>
+                            <div className="field">
+                                <label htmlFor="run-opmode">OpMode</label>
+                                <select
+                                    id="run-opmode"
+                                    value={selectedOpMode}
+                                    onChange={(e) => setSelectedOpMode(e.target.value)}
+                                    disabled={isBusy}
+                                >
+                                    {opModeOptions.map((m) => (
+                                        <option key={m} value={m}>{m}</option>
+                                    ))}
+                                </select>
+                                {robotStatus?.opMode && robotStatus.opMode !== OP_MODE_STOP_SENTINEL && activeOpMode !== selectedOpMode && (
+                                    <span className="field-hint">Robot is on {activeOpMode}</span>
+                                )}
                             </div>
 
-                            {isConnected && robotStatus && (
-                                <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.8rem'}}>
-                                    <div>
-                                        <span style={{opacity: 0.7}}>OpMode:</span>
-                                        <div style={{fontWeight: 600}}>{displayOpMode(robotStatus.opMode)}</div>
-                                    </div>
-                                    <div>
-                                        <span style={{opacity: 0.7}}>Battery:</span>
-                                        <div style={{fontWeight: 600}}>{robotStatus.battery} V</div>
-                                    </div>
-                                    <div style={{gridColumn: 'span 2'}}>
-                                        <span style={{opacity: 0.7}}>Status:</span>
-                                        <div style={{fontWeight: 600, color: robotStatus.status === 'RUNNING' ? '#4ade80' : 'inherit'}}>
-                                            {robotStatus.status}
-                                        </div>
-                                    </div>
-                                    {/* OpMode selector sourced from robotConfig.opModeList when available */}
-                                            {robotConfig?.opModeList?.length > 0 && (
-                                                <div style={{gridColumn: 'span 2', marginTop: '0.5rem'}}>
-                                                    <label style={{display: 'block', fontSize: '0.75rem', opacity: 0.8, marginBottom: '0.25rem'}}>Select OpMode</label>
-                                                    <div style={{width: '100%', maxHeight: 140, overflowY: 'auto', padding: '0.25rem', borderRadius: 6, border: '1px solid rgba(0,0,0,0.06)'}}>
-                                                        {robotConfig.opModeList.map((m, i) => (
-                                                            <div
-                                                                key={i}
-                                                        role="button"
-                                                        tabIndex={0}
-                                                        onClick={() => setSelectedOpMode(m)}
-                                                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setSelectedOpMode(m); }}
-                                                        style={{
-                                                            padding: '0.5rem 0.75rem',
-                                                            borderRadius: 6,
-                                                            cursor: 'pointer',
-                                                            background: selectedOpMode === m ? 'rgba(16,185,129,0.12)' : 'transparent',
-                                                            border: selectedOpMode === m ? '1px solid rgba(16,185,129,0.3)' : '1px solid transparent',
-                                                            marginBottom: 4,
-                                                        }}
-                                                    >
-                                                        {m}
-                                                    </div>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            )}
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Execution Controls */}
-                        {isConnected ? (
-                            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem'}}>
+                            <div className="run-actions">
                                 <button
-                                    className="btn ok"
-                                    onClick={handleInitStartClick}
+                                    className={`btn btn-lg ${isReady ? "ok" : "primary"}`}
+                                    onClick={isReady ? handleStartClick : handleUploadClick}
+                                    disabled={isBusy || pointsCount === 0}
+                                    title={pointsCount === 0 ? "Place at least one point on the field first" : undefined}
                                 >
-                                    {(initialized || hasSentInit) ? '▶ Start' : 'Init'}
+                                    {primaryLabel}
                                 </button>
-                                <button 
-                                    className="btn danger" 
-                                    onClick={onStopOpMode}
-                                >
-                                    ⏹ Stop
+                                <button className="btn btn-lg danger" onClick={onStopOpMode}>
+                                    Stop
                                 </button>
                             </div>
-                        ) : (
-                            <p className="helper-text" style={{textAlign: 'center', margin: 0}}>
-                                Connect to robot WiFi to enable controls
-                            </p>
-                        )}
+                        </>
+                    ) : (
+                        <p className="helper-text">Join the robot&apos;s Wi-Fi to upload and run paths.</p>
+                    )}
 
-                    </div>
+                    {debugMsg && <p className="helper-text">{debugMsg}</p>}
+
+                    {opModeWarning && (
+                        <div className="status-line fail" role="alert">
+                            <span>{opModeWarning}</span>
+                        </div>
+                    )}
+                    {lastUpload?.state === "ok" && (
+                        <div className="status-line ok" role="status">
+                            <span>
+                                ✓ {lastUpload.points} pts · {toFixed(lastUpload.length, 0)} in → {lastUpload.opMode} at {formatClock(lastUpload.at)}
+                                {pathDirty && <em className="status-stale"> — edited since, Start re-uploads it</em>}
+                            </span>
+                            <button className="status-dismiss" onClick={onDismissUpload} aria-label="Dismiss upload status">×</button>
+                        </div>
+                    )}
+                    {lastUpload?.state === "fail" && (
+                        <div className="status-line fail" role="alert">
+                            <span>Upload failed: {lastUpload.reason}</span>
+                            <button className="status-dismiss" onClick={onDismissUpload} aria-label="Dismiss upload error">×</button>
+                        </div>
+                    )}
                 </section>
 
                 <section className="control-card">
@@ -587,14 +543,22 @@ export default function RunPanel({
                         <Stat label="Length (in)" value={lengthDisplay} />
                         <Stat label="Est. time (s)" value={timeDisplay} />
                     </div>
+                    {estTimeBreakdown && (
+                        <p className="helper-text playback-note" title={stopsTitle || "No stops on this path"}>
+                            {toFixed(estTimeBreakdown.driving, 1)} s driving + {toFixed(estTimeBreakdown.stopped, 1)} s stopped
+                            {stopCount > 0 ? ` (${stopCount} stop${stopCount === 1 ? "" : "s"})` : ""}
+                        </p>
+                    )}
                     {previewLimits && (
                         <p
                             className="helper-text playback-note"
                             title={`accel ${toFixed(previewLimits.accel, 1)} in/s^2${previewLimits.source === "robot" && !previewLimits.accelFromRobot ? " (Setup fallback)" : ""}, decel ${toFixed(previewLimits.decel, 1)} in/s^2, strafe ${toFixed(previewLimits.maxStrafe, 1)} in/s`}
                         >
                             {previewLimits.source === "robot"
-                                ? `Using robot limits: ${toFixed(previewLimits.maxSpeed, 1)} in/s`
-                                : `Using preview fallback: ${toFixed(previewLimits.maxSpeed, 1)} in/s (connect to the robot for its real limits)`}
+                                ? `Using robot limits: ${toFixed(previewLimits.maxSpeed, 1)} in/s${previewLimits.accelFromRobot ? "" : `, accel ${toFixed(previewLimits.accel, 0)} in/s² from Setup`}`
+                                : isConnected
+                                    ? `Using preview fallback: ${toFixed(previewLimits.maxSpeed, 1)} in/s (robot sent no limits. Not tuned yet? Open AutoTune at http://${HUB_IP}:10158)`
+                                    : `Using preview fallback: ${toFixed(previewLimits.maxSpeed, 1)} in/s (connect to the robot for its real limits)`}
                         </p>
                     )}
                     <div className="progress-line">

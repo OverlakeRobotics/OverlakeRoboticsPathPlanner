@@ -25,11 +25,12 @@ Optional: Edit `config.js` (next to `index.html`) to customize defaults and tag 
 ### Fast upload
 - Connect to your robot's wifi and upload paths instantly
 - Real time pose updating to see the robot position on screen
-- Requires code from https://github.com/OverlakeRobotics/OverlakeRoboticsLibrary to be on the robot for direct upload and pose updating
+- Requires code from https://github.com/OverlakeRobotics/OverlakeRoboticsLibrary to be on the robot for direct upload and pose updating. Set `DEFAULT_OP_MODE` in `config.js` to your OpMode's name so it is selected for you.
 - Uploads send the path as segments (line / bezier / arc with an explicit heading mode) for the Pedro Pathing follower, plus the sampled points for live drawing. There is no global velocity or tolerance any more: speed is set with `velocity` tags and the follower owns its own tolerances.
 
 ### Playback preview
-- The ghost robot and estimated time use the robot's real limits (max speed, strafe speed, accel/decel) fetched from the path server whenever the robot is connected or after an upload; the Playback card says which limits are in use.
+- The ghost robot and estimated time use the top speeds the robot learned when you tuned Pedro, fetched from the path server whenever the robot is connected or after an upload; the Playback card says which limits are in use. A robot that has not been tuned sends none, so the card tells you to tune it first.
+- The Pedro tuners do not measure acceleration, so unless the robot sets a limit, acceleration comes from Setup.
 - `velocity` tags are honored per segment: a tag on a point changes the speed from the next segment on (a start-point tag applies from the first segment).
 - Without a robot, Setup > General > Playback Preview provides fallback max speed and accel values. These are never uploaded or exported.
 
@@ -43,8 +44,9 @@ Tags are metadata on points that the robot can read (speed changes, waits, launc
 - Add tags to any point from the right panel
 - Tags are run once the robot reaches the point the tag is attached to (each tag also records which segment it ends)
 - `velocity` is a percent of the robot's max speed (0-100, default 100). Paths run at 100% until a `velocity` tag says otherwise.
-- You can edit the code in your robots OpMode to change what each tag does
-- Tags use templates from `config.js`, including units and defaults
+- You say what each tag does in the `tags()` list of your robot's OpMode (see the library README)
+- Tags use templates from `config.js`, including units and defaults. Add one line per tag your robot has.
+- Add `dwell: true` to a tag that stops the robot for its value in seconds, so the time estimate includes it
 
 ### Global variables
 Global variables let you update many tag values from a single number.

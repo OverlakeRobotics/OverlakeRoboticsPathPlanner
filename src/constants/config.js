@@ -1,12 +1,8 @@
 const DEFAULT_CONFIG = {
     TAG_TEMPLATES: [
         { name: "velocity", defaultValue: 100, unit: "%" },
-        { name: "pause", defaultValue: 1, unit: "seconds" },
-        { name: "intake", defaultValue: 0, unit: "ticks/s" },
-        { name: "autoAim", defaultValue: 0, unit: "" },
-        { name: "shooterVelocity", defaultValue: 0, unit: "ticks/s" },
-        { name: "hoodAngle", defaultValue: 0, unit: "degrees" },
-        { name: "launchArtifacts", defaultValue: 1, unit: "seconds" },
+        { name: "pause", defaultValue: 1, unit: "seconds", dwell: true }, // dwell: holds the robot for value seconds
+        { name: "intake", defaultValue: 1000, unit: "ticks/s" },
     ],
     FIELD_SIZE_IN: 144,
     DEFAULT_CANVAS_SIZE: 720,
@@ -17,6 +13,7 @@ const DEFAULT_CONFIG = {
     GRID_DEFAULT_STEP: 24,
     GRID_MIN_STEP: 0.25,
     DEFAULT_SNAP_IN: 3,
+    DEFAULT_OP_MODE: "Path Planning Example", // the OpMode selected until you pick another one
     DEFAULT_FIELD_IMAGE: "biobuzz", // "biobuzz" (2026-27) or "decode" (2025-26)
     DEFAULT_PLAYBACK_SPEED_IN_PER_S: 30,
     DEFAULT_MAX_ACCEL_IN_PER_S2: 40,
@@ -130,6 +127,7 @@ export let DRAW_LABEL_STROKE = DEFAULT_CONFIG.DRAW_LABEL_STROKE;
 export let HUB_WS_PORT = DEFAULT_CONFIG.HUB_WS_PORT;
 
 export let TAG_TEMPLATES = cloneArray(DEFAULT_CONFIG.TAG_TEMPLATES);
+export let DEFAULT_OP_MODE = DEFAULT_CONFIG.DEFAULT_OP_MODE;
 
 export const getInlineConfig = () => {
     if (typeof window === "undefined") return null;
@@ -214,6 +212,7 @@ export const applyRuntimeConfig = (overrides = {}) => {
     HUB_WS_PORT = toNumber(merged.HUB_WS_PORT, DEFAULT_CONFIG.HUB_WS_PORT);
 
     TAG_TEMPLATES = toArray(merged.TAG_TEMPLATES, DEFAULT_CONFIG.TAG_TEMPLATES);
+    DEFAULT_OP_MODE = toString(merged.DEFAULT_OP_MODE, DEFAULT_CONFIG.DEFAULT_OP_MODE);
 
     return merged;
 };
